@@ -61,15 +61,22 @@ CREATE TABLE IF NOT EXISTS steps (
     state TEXT NOT NULL DEFAULT 'pending', result TEXT NOT NULL DEFAULT '',
     why TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '',
     started_at TEXT, ended_at TEXT, wake_at TEXT,
-    cost_usd REAL NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0, passes INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (run_id, step_id));
 CREATE TABLE IF NOT EXISTS questions (
     code TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_id TEXT NOT NULL,
     owner TEXT NOT NULL, text TEXT NOT NULL, asked_at TEXT NOT NULL,
     until TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '',
-    answered_at TEXT, via TEXT NOT NULL DEFAULT '', told TEXT NOT NULL DEFAULT '');
+    answered_at TEXT, via TEXT NOT NULL DEFAULT '', told TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'yesno', choices TEXT NOT NULL DEFAULT '[]');
 CREATE INDEX IF NOT EXISTS questions_by_owner ON questions (owner, answer);
 """
+
+
+#: Columns a file made before them lacks, added when it is opened.
+ADDED = {"steps": (("passes", "INTEGER NOT NULL DEFAULT 0"),),
+         "questions": (("kind", "TEXT NOT NULL DEFAULT 'yesno'"),
+                       ("choices", "TEXT NOT NULL DEFAULT '[]'"))}
 
 
 def now_utc() -> datetime:
@@ -150,6 +157,8 @@ class StepRow:
     ended_at: str | None = None
     wake_at: str | None = None
     cost_usd: float = 0.0
+    #: A repeat's passes so far.
+    passes: int = 0
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -169,6 +178,9 @@ class Question:
     via: str = ""
     #: where the question was put: "dvara", "nowhere"
     told: str = ""
+    #: what it takes: yesno, choice (one of ``choices``), or words
+    kind: str = "yesno"
+    choices: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -184,6 +196,11 @@ class Store:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA busy_timeout=30000")
         self._db.executescript(SCHEMA)
+        for table, columns in ADDED.items():
+            have = {row[1] for row in self._db.execute(f"PRAGMA table_info({table})")}
+            for name, kind in columns:
+                if name not in have:
+                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
         try:
             os.chmod(self.path, 0o600)
         except OSError:
@@ -345,19 +362,24 @@ class Store:
         question.code = question.code or _code()
         self._run(
             "INSERT INTO questions (code, run_id, step_id, owner, text, asked_at, until, "
-            "told) VALUES (?,?,?,?,?,?,?,?)",
+            "told, kind, choices) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (question.code, question.run_id, question.step_id, question.owner,
-             question.text, question.asked_at, question.until, question.told))
+             question.text, question.asked_at, question.until, question.told,
+             question.kind, json.dumps(question.choices)))
         return question
 
     def question(self, code: str) -> Question | None:
         rows = self._rows("SELECT * FROM questions WHERE code = ?", (code.strip().upper(),))
-        return Question(**rows[0]) if rows else None
+        return _question(rows[0]) if rows else None
 
     def question_for(self, run_id: str, step_id: str) -> Question | None:
         rows = self._rows("SELECT * FROM questions WHERE run_id = ? AND step_id = ?",
                           (run_id, step_id))
-        return Question(**rows[0]) if rows else None
+        return _question(rows[0]) if rows else None
+
+    def forget_question(self, run_id: str, step_id: str) -> None:
+        """A repeated step's old question, so its next pass asks afresh."""
+        self._run("DELETE FROM questions WHERE run_id = ? AND step_id = ?", (run_id, step_id))
 
     def questions(self, owner: str | None = None, *, open_only: bool = True) -> list[Question]:
         where = ["answer = ''"] if open_only else []
@@ -366,8 +388,8 @@ class Store:
             where.append("owner = ?")
             params.append(owner)
         sql = "SELECT * FROM questions" + (f" WHERE {' AND '.join(where)}" if where else "")
-        return [Question(**r) for r in self._rows(sql + " ORDER BY asked_at DESC",
-                                                  tuple(params))]
+        return [_question(r) for r in self._rows(sql + " ORDER BY asked_at DESC",
+                                                 tuple(params))]
 
     def answer(self, code: str, answer: str, via: str) -> bool:
         """Write an answer once; a second answer is refused (False)."""
@@ -387,6 +409,15 @@ CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 def _code() -> str:
     return "".join(secrets.choice(CODE_LETTERS) for _ in range(6))
+
+
+def _question(row: dict) -> Question:
+    row = dict(row)
+    try:
+        row["choices"] = json.loads(row.get("choices") or "[]")
+    except ValueError:
+        row["choices"] = []
+    return Question(**{f.name: row[f.name] for f in fields(Question) if f.name in row})
 
 
 def _installed(row: dict) -> Installed:

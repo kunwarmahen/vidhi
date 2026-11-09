@@ -96,7 +96,8 @@ Dvara and Sarathi, and not yet pressed on a real phone.
 
 ## Not here
 
-* **An answer other than yes or no.** A person step is a yes/no; a
-  routine that wants words from the person is a chat.
-* **ntfy's buttons.** A phone notification through ntfy carries the
-  words, not the buttons; open the page or the chat to press one.
+* ~~**An answer other than yes or no.**~~ Choices as buttons, or a few
+  typed words ([05](05-a-repeat-a-join-and-other-answers.md)).
+* ~~**ntfy's buttons.**~~ Drawn on the notification, each with a mark
+  over the person and its exact words, never a key (Dvara's push.py and
+  notes/83).

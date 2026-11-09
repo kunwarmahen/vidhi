@@ -123,9 +123,9 @@ onto the `notify` step, **Arrange**, **Save**, and the saved TOML had
 
 ## Not here
 
-* **Loops.** "Until the room is warm" is a watch (Prahari), not a
-  routine.
-* **A join after a branch.** A step that uses a skipped step is skipped,
-  so a "carry on whichever way it went" step has to use neither branch.
+* ~~**Loops.**~~ A bounded `repeat`: its cap and its stop line on its
+  face ([05](05-a-repeat-a-join-and-other-answers.md)).
+* ~~**A join after a branch.**~~ `after_any`, with `{{any}}` the result
+  of the branch that ran ([05](05-a-repeat-a-join-and-other-answers.md)).
 * **A call's grant for an argument from an earlier step.** It runs only
   if its tool reads.

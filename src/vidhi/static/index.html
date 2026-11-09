@@ -17,7 +17,7 @@
   --accent: #b5651d; --accent-ink: #ffffff; --accent-soft: rgba(181, 101, 29, .12);
   --ok: #2c7a52; --needs: #8b3a6f; --bad: #b3261e; --quiet: #7b7a72;
   --k-call: #2f6f8f; --k-ask: #6b4fa0; --k-read: #2c7a52; --k-check: #9a6a00;
-  --k-person: #8b3a6f; --k-wait: #6f6a62; --k-notify: #1f5fbf;
+  --k-person: #8b3a6f; --k-wait: #6f6a62; --k-notify: #1f5fbf; --k-repeat: #a0452c;
   --focus: rgba(181, 101, 29, .45);
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
           "Helvetica Neue", Arial, sans-serif;
@@ -34,7 +34,7 @@
     --accent: #e3954e; --accent-ink: #1a1007; --accent-soft: rgba(227, 149, 78, .16);
     --ok: #5cc28c; --needs: #d48bbd; --bad: #f07b6f; --quiet: #8f8e85;
     --k-call: #5fa8c9; --k-ask: #a98ee0; --k-read: #5cc28c; --k-check: #d9a93a;
-    --k-person: #d48bbd; --k-wait: #a49e94; --k-notify: #7aa7f0;
+    --k-person: #d48bbd; --k-wait: #a49e94; --k-notify: #7aa7f0; --k-repeat: #e08a6c;
     --focus: rgba(227, 149, 78, .5);
   }
 }
@@ -45,7 +45,7 @@
   --accent: #e3954e; --accent-ink: #1a1007; --accent-soft: rgba(227, 149, 78, .16);
   --ok: #5cc28c; --needs: #d48bbd; --bad: #f07b6f; --quiet: #8f8e85;
   --k-call: #5fa8c9; --k-ask: #a98ee0; --k-read: #5cc28c; --k-check: #d9a93a;
-  --k-person: #d48bbd; --k-wait: #a49e94; --k-notify: #7aa7f0;
+  --k-person: #d48bbd; --k-wait: #a49e94; --k-notify: #7aa7f0; --k-repeat: #e08a6c;
   --focus: rgba(227, 149, 78, .5);
 }
 * { box-sizing: border-box; }
@@ -131,6 +131,7 @@ textarea { font: 13px/1.45 var(--mono); min-height: 70px; resize: vertical; }
 .node { cursor: grab; }
 path.edge { fill: none; stroke: var(--ink-3); stroke-width: 1.6; }
 path.edge.after { stroke-dasharray: 2 4; }
+path.edge.loop { stroke: var(--k-repeat); stroke-dasharray: 6 3; }
 path.edge.gate { stroke: var(--accent); stroke-dasharray: 7 5; }
 path.edge.hit { stroke: transparent; stroke-width: 12; cursor: pointer; }
 text.elabel { font: 11px var(--sans); fill: var(--accent); }
@@ -174,6 +175,9 @@ path.drag { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray
 
   <h2>Ready to install</h2>
   <div id="templates"><p class="muted">…</p></div>
+
+  <h2>Marketplace</h2>
+  <div id="market"><p class="muted">…</p></div>
 </div>
 
 <div id="editor" class="hidden" role="dialog" aria-label="Draw a routine">
@@ -225,9 +229,18 @@ function when(iso) {
                                        month: "short", day: "numeric" });
 }
 const KINDS = { call: "Call a tool", ask: "Ask the model", read: "Read a reading",
-                check: "Check a value", person: "Ask me", wait: "Wait", notify: "Tell me" };
+                check: "Check a value", person: "Ask me", wait: "Wait", notify: "Tell me",
+                repeat: "Repeat" };
 const SHORT = { call: "call", ask: "ask", read: "read", check: "check", person: "ask me",
-                wait: "wait", notify: "tell me" };
+                wait: "wait", notify: "tell me", repeat: "repeat" };
+// only_if: "go", "not go", or "mode is Heat" -> the step it names, and how
+function gateOf(onlyIf) {
+  const w = (onlyIf || "").trim().split(/\s+/);
+  if (!w[0]) return null;
+  if (w[0] === "not" && w.length === 2) return { step: w[1], label: "if no" };
+  if (w.length >= 3 && w[1] === "is") return { step: w[0], label: "if " + w.slice(2).join(" ") };
+  return { step: w[0], label: "if yes" };
+}
 
 // -- lists -----------------------------------------------------------------------------
 const opened = new Set();
@@ -251,12 +264,21 @@ async function loadAsks() {
   for (const q of asks) {
     const card = document.createElement("div");
     card.className = "card ask";
+    const silence = q.kind === "choice" ? "is no choice" : q.kind === "words" ? "is no answer" : "is no";
+    const buttons = q.kind === "choice"
+      ? q.choices.map((c, n) => `<button class="${n ? "" : "main"}" data-a="${esc(c)}">${esc(c)}</button>`).join("")
+      : q.kind === "words"
+        ? `<input type="text" maxlength="300" placeholder="a few words" class="grow" data-words="1"><button class="main" data-send="1">Send</button>`
+        : `<button class="main" data-a="yes">Yes</button><button data-a="no">No</button>`;
     card.innerHTML = `<div class="title">${esc(q.text)}</div>
-      <div class="muted">${esc(q.owner)} · no answer by ${esc(when(q.until))} is no · ${esc(q.code)}</div>
-      <div class="buttons"><button class="main" data-a="yes">Yes</button><button data-a="no">No</button></div>`;
+      <div class="muted">${esc(q.owner)} · no answer by ${esc(when(q.until))} ${silence} · ${esc(q.code)}</div>
+      <div class="buttons">${buttons}</div>`;
+    const words = card.querySelector("[data-words]");
     card.querySelectorAll("button").forEach((b) => b.onclick = async () => {
+      const answer = b.dataset.send ? words.value.trim() : b.dataset.a;
+      if (!answer) return;
       b.disabled = true;
-      try { await api("POST", `/questions/${q.code}`, { answer: b.dataset.a }); }
+      try { await api("POST", `/questions/${q.code}`, { answer }); }
       catch (e) { alert(e.message); }
       refresh();
     });
@@ -363,6 +385,37 @@ async function loadTemplates() {
   for (const b of broken) box.insertAdjacentHTML("beforeend", `<p class="err small">${esc(b)}</p>`);
 }
 
+async function loadMarket() {
+  const box = $("market");
+  let said;
+  try { said = await api("GET", "/market"); }
+  catch (e) { box.innerHTML = `<p class="err small">${esc(e.message)}</p>`; return; }
+  if (!said.market) {
+    box.innerHTML = `<p class="muted small">${esc(said.detail)}</p>`;
+    return;
+  }
+  const trusted = said.trusted.length ? said.trusted.join(", ") : "nobody yet";
+  box.innerHTML = `<p class="muted small"><a href="${esc(said.market)}/market/" target="_blank" rel="noopener">${esc(said.market)}</a>
+    · reviewers you trust: ${esc(trusted)} (<code>vidhi market trust NAME 'KEY'</code>)</p>`;
+  if (!said.listed.length) box.insertAdjacentHTML("beforeend", `<p class="muted small">Nothing listed yet.</p>`);
+  for (const item of said.listed) {
+    const el = document.createElement("div");
+    el.className = "card";
+    const indriya = item.kind === "indriya";
+    el.innerHTML = `<div class="row"><span class="title">${esc(item.title)}</span><code>${esc(item.name)}</code>
+      <span class="muted">${indriya ? "a reading for Prahari" : esc(item.cost)} · reviewed by ${esc(item.reviewer)}</span></div>
+      ${item.about ? `<p class="small">${esc(item.about)}</p>` : ""}
+      <ul class="touches">${(item.touches || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      <div class="buttons"><button class="main get">Get it</button></div>`;
+    el.querySelector(".get").onclick = () => act(async () => {
+      const got = await api("POST", "/market/get", { name: item.name });
+      alert(`${got.name}, signed by ${got.signed_by}: ` + (got.kind === "indriya"
+        ? `install it in Prahari with: ${got.next}` : "it is under Ready to install now."));
+    });
+    box.appendChild(el);
+  }
+}
+
 async function act(fn) {
   try { await fn(); } catch (e) { alert(e.message); }
   refresh(true);
@@ -371,7 +424,7 @@ async function act(fn) {
 async function refresh(all) {
   try {
     await Promise.all([loadStatus(), loadAsks(), loadRuns(),
-                       ...(all ? [loadRoutines(), loadTemplates()] : [])]);
+                       ...(all ? [loadRoutines(), loadTemplates(), loadMarket()] : [])]);
   } catch (e) { if (e.message !== "no token") console.error(e); }
 }
 refresh(true);
@@ -389,12 +442,13 @@ function refsOf(step) {
   const walk = (v) => {
     if (typeof v === "string") {
       for (const m of v.matchAll(/\{\{\s*([a-z][a-z0-9_-]*)/g))
-        if (m[1] !== "inputs" && m[1] !== "run") out.add(m[1]);
+        if (!["inputs", "run", "any"].includes(m[1])) out.add(m[1]);
     } else if (Array.isArray(v)) v.forEach(walk);
     else if (v && typeof v === "object") Object.values(v).forEach(walk);
   };
   for (const [k, v] of Object.entries(step))
-    if (!["id", "title", "after", "only_if", "at", "optional"].includes(k)) walk(v);
+    if (!["id", "title", "after", "after_any", "only_if", "at", "optional", "choices",
+          "repeat", "until"].includes(k)) walk(v);
   return out;
 }
 
@@ -445,7 +499,7 @@ $("e-add").querySelectorAll("button").forEach((b) => b.onclick = () => addStep(b
 
 function newId(kind) {
   const base = { call: "fetch", ask: "write", read: "reading", check: "test", person: "ok",
-                 wait: "pause", notify: "tell" }[kind];
+                 wait: "pause", notify: "tell", repeat: "again" }[kind];
   let n = 1, id = base;
   while (doc.steps.some((s) => s.id === id)) id = base + (++n);
   return id;
@@ -456,7 +510,13 @@ function addStep(kind) {
   const defaults = { call: ["web_fetch", { args: { url: "https://" } }],
     ask: ["Write a short note from {{" + (doc.steps[doc.steps.length - 1]?.id || "x") + "}}", {}],
     read: ["outside-temp", {}], check: ["{{" + (doc.steps[doc.steps.length - 1]?.id || "x") + "}}", { below: 40 }],
-    person: ["Shall I go on?", { within: "2h" }], wait: ["30m", {}], notify: ["Done.", {}] }[kind];
+    person: ["Shall I go on?", { within: "2h" }], wait: ["30m", {}], notify: ["Done.", {}],
+    repeat: [[], { times: 3, every: "15m" }] }[kind];
+  if (kind === "repeat") {
+    const stop = [...doc.steps].reverse().find((s) => "check" in s);
+    defaults[0] = stop ? [stop.id] : [];
+    if (stop) defaults[1].until = stop.id;
+  }
   fresh[kind] = defaults[0];
   Object.assign(fresh, defaults[1]);
   const xs = doc.steps.map((s) => (s.at || [0, 0])[0]);
@@ -481,8 +541,9 @@ function pos(step) { return step.at && step.at.length === 2 ? step.at : [40, 40]
 function placeUnplaced() {
   if (doc.steps.every((s) => s.at && s.at.length === 2)) return;
   const waits = (s) => {
-    const out = new Set([...refsOf(s), ...(s.after || [])]);
-    if (s.only_if) out.add(s.only_if.split(/\s+/).pop());
+    const out = new Set([...refsOf(s), ...(s.after || []), ...(s.after_any || []),
+                         ...(Array.isArray(s.repeat) ? s.repeat : [])]);
+    if (s.only_if) out.add(gateOf(s.only_if).step);
     return out;
   };
   const wave = {}, done = new Set();
@@ -513,9 +574,11 @@ function draw() {
     const lines = [];
     for (const r of refsOf(step)) lines.push([r, "use"]);
     for (const a of step.after || []) if (!refsOf(step).has(a)) lines.push([a, "after"]);
+    for (const a of step.after_any || []) lines.push([a, "any"]);
+    if (Array.isArray(step.repeat)) for (const m of step.repeat) lines.push([m, "repeat"]);
     if (step.only_if) {
-      const words = step.only_if.split(/\s+/);
-      lines.push([words[words.length - 1], words[0] === "not" ? "if no" : "if yes"]);
+      const g = gateOf(step.only_if);
+      lines.push([g.step, g.label]);
     }
     for (const [from, how] of lines) {
       const src = byId[from];
@@ -524,9 +587,10 @@ function draw() {
       const a = [x1 + W, y1 + H / 2], b = [x2, y2 + H / 2];
       const dx = Math.max(40, (b[0] - a[0]) / 2);
       const d = `M${a[0]},${a[1]} C${a[0] + dx},${a[1]} ${b[0] - dx},${b[1]} ${b[0]},${b[1]}`;
-      const cls = how === "use" ? "edge" : how === "after" ? "edge after" : "edge gate";
+      const cls = how === "use" ? "edge" : how === "after" || how === "any" ? "edge after"
+        : how === "repeat" ? "edge loop" : "edge gate";
       svgEl("path", { d, class: cls, "marker-end": "url(#arrow)" }, edges);
-      if (how.startsWith("if")) {
+      if (how.startsWith("if") || how === "any" || how === "repeat") {
         const t = svgEl("text", { x: (a[0] + b[0]) / 2 - 14, y: (a[1] + b[1]) / 2 - 6, class: "elabel" }, edges);
         t.textContent = how;
       }
@@ -619,7 +683,8 @@ function side() {
   if (!step) return reading ? sideBefore(box) : sideRoutine(box);
   if (reading) return sideStepRead(box, step);
   const kind = kindOf(step);
-  const gates = doc.steps.filter((s) => s.id !== step.id && ("check" in s || "person" in s));
+  const gates = doc.steps.filter((s) => s.id !== step.id && ("check" in s || "repeat" in s ||
+                                   ("person" in s && !s.typed)));
   const gate = step.only_if || "";
   let html = `<div class="row"><b>${esc(KINDS[kind])}</b><span class="grow"></span>
     <button class="link" id="s-back">the routine</button></div>
@@ -643,18 +708,32 @@ function side() {
         `<option ${t === test ? "selected" : ""}>${t}</option>`).join("")}</select>` +
       field("Than / for", step[test] ?? "", 'id="s-against"');
   } else if (kind === "person") {
-    html += field("The question (yes or no)", step.person, 'data-k="person"', true) +
+    html += field("The question", step.person, 'data-k="person"', true) +
+      field("Choices, as buttons (two or three, commas; empty: yes or no)", (step.choices || []).join(", "), 'data-k="choices"') +
+      `<label class="f"><input type="checkbox" data-k="typed" ${step.typed ? "checked" : ""}> I answer in a few typed words instead</label>` +
       field("Wait for an answer up to (no answer is no)", step.within || "24h", 'data-k="within"');
+  } else if (kind === "repeat") {
+    const stops = doc.steps.filter((s) => (step.repeat || []).includes(s.id) &&
+                                          ("check" in s || ("person" in s && !s.choices && !s.typed)));
+    html += field("Steps to do again (ids, commas)", (step.repeat || []).join(", "), 'data-k="repeat"') +
+      `<label class="f">Until this says yes</label><select id="s-until"><option value="">(pick a check it repeats)</option>
+        ${stops.map((s) => `<option ${s.id === step.until ? "selected" : ""}>${esc(s.id)}</option>`).join("")}</select>` +
+      field("At most this many times (1-20)", step.times ?? 3, 'data-k="times" data-num="1"') +
+      field("Every (5m at the least; 15m if empty)", step.every || "", 'data-k="every"');
   } else if (kind === "wait") {
     html += field("Wait for (30m, 2h)", step.wait || "", 'data-k="wait"') +
       field("…or until a time of day (07:30)", step.until || "", 'data-k="until"');
   } else if (kind === "notify") {
     html += field("What to tell me", step.notify, 'data-k="notify"', true);
   }
+  const gateOptions = gates.map((g) => g.choices
+    ? g.choices.map((c) => [`${g.id} is ${c}`, `${g.id} was ${c}`])
+    : [[g.id, g.id + " said yes"], ["not " + g.id, g.id + " said no"]]).flat();
   html += `<label class="f">Only if</label><select id="s-gate"><option value="">always</option>
-    ${gates.map((g) => [g.id, "not " + g.id]).flat().map((v) =>
-      `<option value="${esc(v)}" ${v === gate ? "selected" : ""}>${esc(v.startsWith("not ") ? v.slice(4) + " said no" : v + " said yes")}</option>`).join("")}</select>
+    ${gateOptions.map(([v, label]) =>
+      `<option value="${esc(v)}" ${v === gate ? "selected" : ""}>${esc(label)}</option>`).join("")}</select>
     ${field("Also waits for (ids, commas)", (step.after || []).join(", "), 'data-k="after"')}
+    ${field("Runs after any one of (two or more ids; {{any}} is the one that ran)", (step.after_any || []).join(", "), 'data-k="after_any"')}
     <label class="f"><input type="checkbox" data-k="optional" ${step.optional ? "checked" : ""}> optional: if it fails, go on without it</label>
     <div class="buttons"><button class="danger" id="s-del">Delete this step</button></div>`;
   box.innerHTML = html;
@@ -666,9 +745,12 @@ function side() {
       const old = step.id, now = el.value.trim();
       if (!now || doc.steps.some((s) => s !== step && s.id === now)) return;
       renameRefs(old, now); step.id = now; selected = now;
-    } else if (k === "after") {
+    } else if (["after", "after_any", "choices", "repeat"].includes(k)) {
       const ids = el.value.split(",").map((x) => x.trim()).filter(Boolean);
-      if (ids.length) step.after = ids; else delete step.after;
+      if (ids.length || k === "repeat") step[k] = ids; else delete step[k];
+    } else if (el.dataset.num) {
+      const n = Number(el.value);
+      if (el.value.trim() !== "" && !isNaN(n)) step[k] = n; else delete step[k];
     } else if (el.dataset.json) {
       try { step[k] = JSON.parse(el.value || "{}"); el.classList.remove("err"); }
       catch (_) { el.classList.add("err"); return; }
@@ -689,11 +771,15 @@ function side() {
     test.onchange = put; against.oninput = put;
   }
   $("s-gate").onchange = (e) => { if (e.target.value) step.only_if = e.target.value; else delete step.only_if; draw(); check(); };
+  if ($("s-until")) $("s-until").onchange = (e) => { if (e.target.value) step.until = e.target.value; else delete step.until; check(); };
   $("s-del").onclick = () => {
     doc.steps = doc.steps.filter((s) => s !== step);
     for (const s of doc.steps) {
-      if (s.after) { s.after = s.after.filter((a) => a !== step.id); if (!s.after.length) delete s.after; }
-      if (s.only_if && s.only_if.split(/\s+/).pop() === step.id) delete s.only_if;
+      for (const k of ["after", "after_any"])
+        if (s[k]) { s[k] = s[k].filter((a) => a !== step.id); if (!s[k].length) delete s[k]; }
+      if (Array.isArray(s.repeat)) s.repeat = s.repeat.filter((a) => a !== step.id);
+      if (s.until === step.id && "repeat" in s) delete s.until;
+      if (s.only_if && gateOf(s.only_if).step === step.id) delete s.only_if;
     }
     selected = null; draw(); side(); check();
   };
@@ -705,8 +791,14 @@ function renameRefs(old, now) {
       ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)])) : v;
   for (const s of doc.steps) {
     for (const k of Object.keys(s)) if (!["id", "at"].includes(k)) s[k] = fix(s[k]);
-    if (s.after) s.after = s.after.map((a) => a === old ? now : a);
-    if (s.only_if) s.only_if = s.only_if.replace(new RegExp("\\b" + old + "$"), now);
+    for (const k of ["after", "after_any", "repeat"])
+      if (Array.isArray(s[k])) s[k] = s[k].map((a) => a === old ? now : a);
+    if ("repeat" in s && s.until === old) s.until = now;
+    if (s.only_if) {
+      const w = s.only_if.split(/\s+/);
+      const at = w[0] === "not" ? 1 : 0;
+      if (w[at] === old) { w[at] = now; s.only_if = w.join(" "); }
+    }
   }
 }
 function sideRoutine(box) {

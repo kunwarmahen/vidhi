@@ -92,7 +92,7 @@ id = "b"
 notify = "hi"
 only_if = "a"
 """
-    with pytest.raises(rt.RoutineError, match="only a check or a person says yes"):
+    with pytest.raises(rt.RoutineError, match="only a check, a question or a repeat says yes"):
         rt.parse(text)
 
 
@@ -109,7 +109,7 @@ only_if = "not ok"
 """
     routine = rt.parse(text)
     assert routine.order() == [["ok"], ["b"]]
-    assert routine.step("b").gate == ("ok", False)
+    assert routine.step("b").gate == ("ok", False, "")
 
 
 def test_the_words_say_a_call_built_from_an_earlier_step_only_runs_if_it_reads():

@@ -154,9 +154,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--all", action="store_true")
     who(p)
     js(p)
-    p = sub.add_parser("answer", help="answer a run's question: yes or no")
+    p = sub.add_parser("answer", help="answer a run's question: yes or no, a choice "
+                                      "(its words or number), or a few words")
     p.add_argument("code")
-    p.add_argument("word")
+    p.add_argument("word", nargs="+")
     p.add_argument("--via", default="the terminal")
     p.add_argument("--any", action="store_true", help="whoever it was put to (the "
                                                       "computer's own person may)")
@@ -183,7 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     m = sub.add_parser("market", help="publish, review and fetch routines")
     msub = m.add_subparsers(dest="verb", required=True)
-    q = msub.add_parser("publish", help="send a routine to a marketplace's queue")
+    q = msub.add_parser("publish", help="send a routine (or an indriya template) to a "
+                                        "marketplace's queue")
     q.add_argument("file")
     q.add_argument("--to", dest="base", default="")
     q.add_argument("--as", dest="publisher", required=True, metavar="YOUR_NAME")
@@ -203,9 +205,16 @@ def build_parser() -> argparse.ArgumentParser:
             q.add_argument("--why", required=True)
     q = msub.add_parser("list", help="what a marketplace lists")
     q.add_argument("--from", dest="base", default="")
-    q = msub.add_parser("get", help="fetch a listed routine as a template, if its "
-                                    "signature is by a reviewer you trust")
+    q.add_argument("--kind", choices=market.KINDS, default=None,
+                   help="only routines, or only indriya templates")
+    q.add_argument("--json", action="store_true", dest="json_out")
+    q = msub.add_parser("get", help="fetch a listed routine (or indriya template), if "
+                                    "its signature is by a reviewer you trust")
     q.add_argument("name")
+    q.add_argument("--from", dest="base", default="")
+    q.add_argument("--json", action="store_true", dest="json_out")
+    q = msub.add_parser("reviewers", help="who a marketplace says may approve, with "
+                                          "their keys (to compare, not to trust from)")
     q.add_argument("--from", dest="base", default="")
     q = msub.add_parser("trust", help="trust a reviewer's signatures")
     q.add_argument("name")
@@ -214,8 +223,10 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("name")
     q.add_argument("key", help="their public key line, or a .pub file")
     q.add_argument("--dir", required=True)
-    q = msub.add_parser("serve", help="run a marketplace by itself")
-    q.add_argument("--dir", required=True)
+    q = msub.add_parser("serve", help="run a marketplace by itself (only /market/)")
+    q.add_argument("--dir", default=None,
+                   help="where it keeps what it lists (default $VIDHI_MARKET_DIR, or "
+                        "~/.vidhi-market)")
     q.add_argument("--host", default="127.0.0.1")
     q.add_argument("--port", type=int, default=8788)
     return parser
@@ -423,15 +434,18 @@ def _print_run(store: Store, run) -> None:
     print(f"run {run.id} of {run.routine}: {run.state}"
           + (f" -- {run.detail}" if run.detail else ""))
     for step in full["steps"]:
-        said = ": ".join(x for x in (step["why"], step["detail"]) if x)
+        log = step["detail"] if "\n" in step["detail"] else ""   # a repeat's passes
+        said = ": ".join(x for x in (step["why"], "" if log else step["detail"]) if x)
         print(f"  {step['state']:<8} {step['title']}" + (f"  ({said})" if said else ""))
+        for line in log.splitlines():
+            print(f"           {line}")
         if step["result"] and step["state"] in ("done", "failed"):
             shown = " ".join(step["result"].split())
             print(f"           {shown[:200]}{'…' if len(shown) > 200 else ''}")
     for question in full["questions"]:
         if not question["answer"]:
             print(f"  asks you: {question['text']}")
-            print(f"    vidhi answer {question['code']} yes   (or no)")
+            print(f"    {_how_to_answer(question)}")
 
 
 def _runs(args, state, store) -> int:
@@ -475,13 +489,23 @@ def _questions(args, state, store) -> int:
     for question in found:
         run = store.run(question.run_id)
         print(f"{question.code}  {run.routine if run else '?'}: {question.text}")
-        print(f"    by {question.until}: vidhi answer {question.code} yes|no")
+        print(f"    by {question.until}: {_how_to_answer(question.as_dict())}")
     return 0
+
+
+def _how_to_answer(question: dict) -> str:
+    code = question["code"]
+    if question.get("kind") == "choice":
+        return f"vidhi answer {code} " + " | ".join(
+            f"{n} ({c})" for n, c in enumerate(question.get("choices") or [], 1))
+    if question.get("kind") == "words":
+        return f"vidhi answer {code} your words"
+    return f"vidhi answer {code} yes   (or no)"
 
 
 def _answer(args, state, store) -> int:
     runner = make_runner(state, store)
-    question, run = runner.answer(args.code, args.word, via=args.via,
+    question, run = runner.answer(args.code, " ".join(args.word), via=args.via,
                                   owner=None if args.any else args.as_actor)
     if run is not None and serving(state) is None and run.state == "queued":
         run = runner.go(run.id) or run
@@ -613,16 +637,37 @@ def _market(args, state) -> int:
         said = market.reject(args.base, args.id, args.why, Path(args.key), args.reviewer)
         print(f"{said['name']} v{said['version']}: {said['status']} ({said['why']})")
     elif verb == "list":
-        listed = market.index(args.base)
+        listed = [i for i in market.index(args.base)
+                  if args.kind is None or i.get("kind", "routine") == args.kind]
+        if args.json_out:
+            print(json.dumps(listed))
+            return 0
         if not listed:
             print("nothing listed yet")
         for item in listed:
-            print(f"{item['name']} v{item['version']}  by {item['publisher']}, reviewed "
-                  f"by {item['reviewer']}: {item['title']} -- {item.get('cost')}")
+            kind = "" if item.get("kind", "routine") == "routine" else " (indriya)"
+            print(f"{item['name']} v{item['version']}{kind}  by {item['publisher']}, "
+                  f"reviewed by {item['reviewer']}: {item['title']} -- {item.get('cost')}")
     elif verb == "get":
         path, signer = market.get(args.base, args.name, state)
+        text = path.read_text()
+        kind = market.kind_of(text)
+        if args.json_out:
+            print(json.dumps({"name": path.stem, "kind": kind, "signed_by": signer,
+                              "path": str(path), "toml": text}))
+            return 0
         print(f"fetched {path.stem}, signed by {signer} (whom you trust); install it with: "
-              f"vidhi install {path.stem}")
+              + (f"prahari indriya install {path.stem} --from-market" if kind == "indriya"
+                 else f"vidhi install {path.stem}"))
+    elif verb == "reviewers":
+        found = market.reviewers(args.base)
+        if not found:
+            print("this marketplace lists no reviewers")
+        for one in found:
+            print(f"{one['name']}: {one['key']}")
+        if found:
+            print("compare each key with what that reviewer published elsewhere before:\n"
+                  "  vidhi market trust NAME 'KEY'")
     elif verb == "trust":
         path = market.trust(state, args.name, _key_line(args.key))
         print(f"trusting {args.name}'s signatures ({path})")
@@ -640,9 +685,10 @@ def _market_serve(args) -> int:
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import urlparse
 
-    from vidhi.http import MAX_BODY, market_route
+    from vidhi.http import MAX_BODY, market_answer
 
-    shop = market.Market(Path(args.dir).expanduser())
+    from vidhi.keeps import market_dir
+    shop = market.Market(Path(args.dir).expanduser() if args.dir else market_dir())
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "vidhi-market"
@@ -663,16 +709,24 @@ def _market_serve(args) -> int:
                     return self._out(400, {"detail": "the body is not JSON"})
                 if not isinstance(body, dict):
                     return self._out(400, {"detail": "the body is a JSON object"})
-            if not url.path.startswith("/market/"):
+            if url.path == "/":
+                self.send_response(302)
+                self.send_header("Location", "/market/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            if not (url.path == "/market" or url.path.startswith("/market/")):
                 return self._out(404, {"detail": "not found"})
-            status, data = market_route(shop, method, url.path, body, self.client_address[0])
-            self._out(status, data)
+            self._send(*market_answer(self, shop, method, url.path, body))
 
         def _out(self, status, data):
-            raw = json.dumps(data).encode()
+            self._send(status, json.dumps(data).encode(), "application/json")
+
+        def _send(self, status, raw, kind):
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(raw)))
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(raw)
 

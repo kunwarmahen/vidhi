@@ -78,8 +78,11 @@ call the brief makes, its cost, and the inputs it would run with
 
 ## Not here
 
-* **Inputs per trigger.** A schedule or a watch starts the routine with
-  its installed inputs (and `found`); a second set of inputs is a second
-  routine.
+* ~~**Inputs per trigger.**~~ A schedule or a watch keeps its own
+  values (`samay add ... --input city=Cary`, `prahari add ... --routine
+  NAME --input room=porch`, or `routine_inputs` from the agent), given
+  to each run over the installed ones. Whether the routine has that
+  blank is Vidhi's to say when the run starts: a schedule with a blank
+  it doesn't have fails, in Vidhi's words.
 * **A trigger that waits for the run.** Starting returns at once; what
   the routine finds is the routine's to say.

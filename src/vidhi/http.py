@@ -22,7 +22,10 @@ served by ``vidhi serve``.
     GET    /api/runs/ID                        one, each step and what it gave
     POST   /api/runs/ID/stop
     GET    /api/questions                      what runs are waiting to hear
-    POST   /api/questions/CODE   {answer}      yes or no
+    POST   /api/questions/CODE   {answer}      yes or no, a choice, or a few words
+    GET    /api/market                         what the marketplace (VIDHI_MARKET) lists
+    POST   /api/market/get       {name}        fetch one, its signature checked
+                                               against the reviewers trusted here
 
     GET/POST /market/...        the marketplace's own (market.py), no token:
                                 its rules are signatures, not a page's token
@@ -150,6 +153,22 @@ class Api:
                 return 200, describe(self.store, self.runner.stop(run.id))
         if parts == ["questions"] and method == "GET":
             return 200, [q.as_dict() for q in self.store.questions()]
+        if parts == ["market"] and method == "GET":
+            base = os.environ.get("VIDHI_MARKET", "").strip()
+            if not base:
+                return 200, {"market": None, "listed": [], "trusted": _trusted(self.state),
+                             "detail": "no marketplace set: VIDHI_MARKET (Sarathi's "
+                                       "[vidhi] market)"}
+            return 200, {"market": base, "listed": market.index(base),
+                         "trusted": _trusted(self.state)}
+        if parts == ["market", "get"] and method == "POST":
+            name = str(body.get("name") or "").strip()
+            path, signer = market.get("", name, self.state)
+            kind = market.kind_of(path.read_text())
+            return 200, {"name": path.stem, "kind": kind, "signed_by": signer,
+                         "next": (f"prahari indriya install {path.stem} --from-market"
+                                  if kind == "indriya" else "install it from Ready "
+                                  "routines")}
         if len(parts) == 2 and parts[0] == "questions" and method == "POST":
             question, run = self.runner.answer(parts[1], str(body.get("answer") or ""),
                                                via="Vidhi's page")
@@ -241,6 +260,37 @@ def check(text: str) -> dict:
             "waits": {s.id: sorted(s.waits_for()) for s in routine.steps}}
 
 
+def _trusted(state: Path) -> list[str]:
+    """The reviewers this person trusts, by name."""
+    path = market.trusted_file(state)
+    lines = path.read_text().splitlines() if path.is_file() else []
+    return [ln.split()[0] for ln in lines if ln.strip()]
+
+
+def market_peer(handler) -> str:
+    """Who a publish is counted against: the peer -- or, ONLY for a request
+    that came from this computer (Tailscale Funnel's proxy), the first
+    address in its X-Forwarded-For. A request straight from the internet
+    can't name somebody else's address."""
+    peer = handler.client_address[0]
+    if peer in ("127.0.0.1", "::1"):
+        forwarded = (handler.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        if forwarded:
+            return forwarded[:64]
+    return peer
+
+
+def market_answer(handler, shop: market.Market, method: str, path: str,
+                  body: dict) -> tuple[int, bytes, str]:
+    """A ``/market/`` request: the page, or the JSON route."""
+    if method == "GET" and path in ("/market", "/market/"):
+        base = os.environ.get("VIDHI_MARKET_PUBLIC_URL", "").strip() or \
+            f"http://{handler.headers.get('Host') or 'localhost'}"
+        return 200, market.page(shop, base.rstrip("/")), "text/html; charset=utf-8"
+    status, data = market_route(shop, method, path, body, market_peer(handler))
+    return status, json.dumps(data).encode(), "application/json"
+
+
 def _q(query: dict, key: str) -> str | None:
     values = query.get(key) or []
     return values[0] if values and values[0] else None
@@ -308,6 +358,8 @@ def market_route(shop: market.Market, method: str, path: str, body: dict,
     try:
         if parts == ["index"] and method == "GET":
             return 200, shop.index()
+        if parts == ["reviewers"] and method == "GET":
+            return 200, shop.reviewers()
         if len(parts) == 2 and parts[0] == "routines" and method == "GET":
             return 200, shop.listed(parts[1])
         if parts == ["publish"] and method == "POST":
@@ -370,15 +422,14 @@ def _handler(server: VidhiServer):
                 return self._send(200, page(), "text/html; charset=utf-8")
             if method == "GET" and url.path == "/favicon.svg":
                 return self._send(200, favicon(), "image/svg+xml")
-            if url.path.startswith("/market/"):
+            if url.path == "/market" or url.path.startswith("/market/"):
                 if server.shop is None:
                     return self._json(404, {"detail": "no marketplace here"})
                 body = self._body() if method == "POST" else {}
                 if body is None:
                     return None
-                status, data = market_route(server.shop, method, url.path, body,
-                                            self.client_address[0])
-                return self._json(status, data)
+                return self._send(*market_answer(self, server.shop, method, url.path,
+                                                 body))
             if not url.path.startswith("/api/"):
                 return self._json(404, {"detail": "not found"})
             offered = self.headers.get("Authorization", "")

@@ -17,7 +17,17 @@ no connection, no thread.
 
 SILENCE IS NO. A question nobody answered by its time is taken as no,
 and the run says so: a routine that was going to send something on a
-yes doesn't send it because somebody was asleep.
+yes doesn't send it because somebody was asleep. A question with
+choices, or one that takes typed words, unanswered gives nothing, and a
+step that waited on a choice is skipped.
+
+A REPEAT IS A WAIT, THEN THE SAME STEPS AGAIN. When its stop step said
+no and passes are left, the repeat waits ``every`` (a row with a time,
+like a ``wait`` step: nothing is held open), then puts its group back to
+pending -- their old results, and any question they asked, forgotten --
+and the run carries on as if those steps had never run. What each pass
+found is kept on the repeat's own row, one line a pass, so the person
+can read how it went.
 
 A FAILED STEP STOPS THE RUN, unless it is ``optional``: then it gives
 nothing ("") and the run carries on, so a morning brief whose mail
@@ -106,16 +116,12 @@ class Runner:
 
     def answer(self, code: str, word: str, *, via: str,
                owner: str | None = None) -> tuple[Question, Run | None]:
+        """Write the answer: yes or no; one of its choices (by its words or
+        its number); or, for one that takes words, the words."""
         question = self.store.question(code)
         if question is None or (owner is not None and question.owner != owner):
             raise RunError(f"no question {code.strip().upper()} waiting for you")
-        said = word.strip().lower()
-        if said in YES:
-            said = "yes"
-        elif said in NO:
-            said = "no"
-        else:
-            raise RunError("the answer is yes or no")
+        said = _said(question, word)
         if question.answer:
             raise RunError(f"{question.code} was already answered: {question.answer}"
                            + (f" ({question.via})" if question.via else ""))
@@ -221,6 +227,8 @@ class Runner:
                             continue
                         results = {k: r.result for k, r in rows.items()
                                    if r.state in ("done", "failed")}
+                        if step.after_any:
+                            results["any"] = _any(step, rows)
                         self.store.set_step(run.id, step.id, state="running",
                                             started_at=iso(self.now()))
                         going[pool.submit(self._step, run, routine, step, results, info,
@@ -277,21 +285,43 @@ class Runner:
             step = routine.step(row.step_id)
             if step.kind == "person":
                 question = self.store.question_for(run.id, step.id)
-                if question is not None and question.answer:
+                if question is not None and question.answer and \
+                        question.via != "nobody answered in time":
                     self.store.set_step(run.id, step.id, state="done",
                                         result=question.answer, ended_at=iso(now),
-                                        why=f"you said {question.answer}"
+                                        why=f"you said {_quoted(question)}"
                                         + (f" ({question.via})" if question.via else ""))
-                elif question is None or now >= (from_iso(question.until) or now):
-                    if question is not None:
-                        self.store.answer(question.code, "no", "nobody answered in time")
-                    self.store.set_step(run.id, step.id, state="done", result="no",
+                elif question is None or question.answer or \
+                        now >= (from_iso(question.until) or now):
+                    silent = "no" if step.answers == "yesno" else ""
+                    if question is not None and not question.answer:
+                        self.store.answer(question.code, silent or "(no answer)",
+                                          "nobody answered in time")
+                    self.store.set_step(run.id, step.id, state="done", result=silent,
                                         ended_at=iso(now),
-                                        why="nobody answered in time, so it is no")
+                                        why="nobody answered in time, so it is no"
+                                        if silent else "nobody answered in time")
+            elif step.kind == "repeat":
+                if row.wake_at is None or now >= (from_iso(row.wake_at) or now):
+                    self._again(run, routine, step, row)
             elif step.kind == "wait":
                 if row.wake_at is None or now >= (from_iso(row.wake_at) or now):
                     self.store.set_step(run.id, step.id, state="done", ended_at=iso(now),
                                         why="waited")
+
+    def _again(self, run: Run, routine: rt.Routine, step: rt.Step, row: StepRow) -> None:
+        """A repeat's next pass: its group back to pending, what it found
+        and asked forgotten (its cost kept on the repeat's row)."""
+        rows = {r.step_id: r for r in self.store.steps(run.id)}
+        spent = sum(rows[m].cost_usd for m in step.body if m in rows)
+        for member in step.body:
+            self.store.forget_question(run.id, member)
+            self.store.set_step(run.id, member, state="pending", result="", why="",
+                                detail="", started_at=None, ended_at=None, wake_at=None,
+                                cost_usd=0.0)
+        self.store.set_step(run.id, step.id, state="pending", wake_at=None,
+                            cost_usd=row.cost_usd + spent,
+                            why=f"pass {row.passes + 1} of {step.times}")
 
     def _info(self, run: Run) -> dict[str, str]:
         here = local_now(self.now())
@@ -343,6 +373,9 @@ class Runner:
             self._done(run, step, done, why={"sent": "sent to you", "kept": "kept for "
                                              "your channel to collect"}.get(done.text, ""))
             return
+        if kind == "repeat":
+            self._pass(run, step)
+            return
         if kind == "person":
             question = self.store.question_for(run.id, step.id)
             if question is None:
@@ -350,7 +383,8 @@ class Runner:
                 until = now() + timedelta(seconds=step.within)
                 question = self.store.ask(Question(
                     code="", run_id=run.id, step_id=step.id, owner=run.owner, text=text,
-                    asked_at=iso(now()), until=iso(until)))
+                    asked_at=iso(now()), until=iso(until), kind=step.answers,
+                    choices=list(step.choices)))
                 said = self._put(who, routine, question, until)
                 self.store.set_question(question.code, told=said)
             self.store.set_step(run.id, step.id, state="waiting", wake_at=question.until,
@@ -363,18 +397,60 @@ class Runner:
             return
         raise RunError(f"no way to do a {kind} step")
 
+    def _pass(self, run: Run, step: rt.Step) -> None:
+        """A repeat's group has finished a pass: stop (its until said yes),
+        stop (no passes left), or wait ``every`` and go again."""
+        rows = {r.step_id: r for r in self.store.steps(run.id)}
+        mine = rows[step.id]
+        passes = mine.passes + 1
+        stop = rows[step.until]
+        said = stop.result.strip().lower() if stop.state == "done" else ""
+        how = stop.why or (stop.state if stop.state != "done" else said) or "nothing"
+        stamp = local_now(self.now()).strftime("%H:%M")
+        log = ([ln for ln in (mine.detail or "").splitlines() if ln.strip()]
+               + [f"pass {passes} ({stamp}): {step.until} said {said or 'nothing'} -- {how}"]
+               )[-rt.MAX_TIMES:]
+        if said == "yes":
+            self.store.set_step(run.id, step.id, state="done", result="yes", passes=passes,
+                                detail="\n".join(log), ended_at=iso(self.now()),
+                                why=f"{step.until} said yes on pass {passes} ({how})")
+            return
+        if passes >= step.times:
+            self.store.set_step(run.id, step.id, state="done", result="no", passes=passes,
+                                detail="\n".join(log), ended_at=iso(self.now()),
+                                why=f"{step.until} still said no after {passes} "
+                                    f"pass{'es' if passes != 1 else ''} ({how})")
+            return
+        wake = self.now() + timedelta(seconds=rt.duration(step.every or rt.DEFAULT_EVERY))
+        self.store.set_step(run.id, step.id, state="waiting", wake_at=iso(wake),
+                            passes=passes, detail="\n".join(log),
+                            why=f"pass {passes} of {step.times}: {how}; again at "
+                                f"{local_now(wake).strftime('%a %H:%M')}")
+
     def _put(self, who: Who, routine: rt.Routine, question: Question,
              until: datetime) -> str:
         code = question.code
         by = local_now(until).strftime("%a %H:%M")
-        lines = [f"{routine.title} asks: {question.text}", "",
-                 f"Answer: /routines yes {code}   or   /routines no {code}",
-                 f"(No answer by {by} is no.)"]
+        if question.kind == "choice":
+            taps = [{"word": f"/routines pick {code} {n}", "label": choice}
+                    for n, choice in enumerate(question.choices, 1)]
+            how = "Answer: " + "   or   ".join(f"/routines pick {code} {n} ({choice})"
+                                               for n, choice in enumerate(question.choices, 1))
+            silence = "No answer by {by} is no choice."
+        elif question.kind == "words":
+            taps = []
+            how = f"Answer in a few words: /routines say {code} your words"
+            silence = "No answer by {by} is no answer."
+        else:
+            taps = [{"word": f"/routines yes {code}", "label": "Yes"},
+                    {"word": f"/routines no {code}", "label": "No"}]
+            how = f"Answer: /routines yes {code}   or   /routines no {code}"
+            silence = "No answer by {by} is no."
+        lines = [f"{routine.title} asks: {question.text}", "", how,
+                 "(" + silence.format(by=by) + ")"]
         if self.page:
             lines.append(f"Or on Vidhi's page: {self.page}")
-        done = self.roads.tell(who, "\n".join(lines), taps=[
-            {"word": f"/routines yes {code}", "label": "Yes"},
-            {"word": f"/routines no {code}", "label": "No"}])
+        done = self.roads.tell(who, "\n".join(lines), taps=taps or None)
         return done.text if done.ok else f"failed: {done.detail}"
 
     def _wake_at(self, step: rt.Step) -> datetime:
@@ -404,25 +480,72 @@ class Runner:
                                 cost_usd=done.cost_usd, ended_at=iso(self.now()))
 
 
+def _said(question: Question, word: str) -> str:
+    """The answer as it is kept, or RunError saying what it takes."""
+    if question.kind == "choice":
+        given = " ".join(word.split())
+        if given.isdigit() and 1 <= int(given) <= len(question.choices):
+            return question.choices[int(given) - 1]
+        for choice in question.choices:
+            if choice.lower() == given.lower():
+                return choice
+        raise RunError("the answer is one of: " + ", ".join(
+            f"{n} {c}" for n, c in enumerate(question.choices, 1)))
+    if question.kind == "words":
+        given = " ".join(word.split())
+        if not given:
+            raise RunError("the answer is a few words")
+        if len(given) > rt.MAX_TYPED:
+            raise RunError(f"the answer is {rt.MAX_TYPED} characters at the most")
+        return given
+    said = word.strip().lower()
+    if said in YES:
+        return "yes"
+    if said in NO:
+        return "no"
+    raise RunError("the answer is yes or no")
+
+
+def _quoted(question: Question) -> str:
+    return question.answer if question.kind == "yesno" else f'"{question.answer}"'
+
+
+def _any(step: rt.Step, rows: dict[str, StepRow]) -> str:
+    """The result of the first of ``after_any`` that ran."""
+    for other in step.after_any:
+        if rows[other].state == "done":
+            return rows[other].result
+    return ""
+
+
 def _skip_why(step: rt.Step, rows: dict[str, StepRow]) -> str:
     gate = step.gate
     if gate:
-        gated, want = gate
+        gated, want, choice = gate
         row = rows[gated]
         if row.state == "skipped":
             return f"{gated} was skipped"
-        said = row.result.strip().lower()
-        if (said == "yes") != want:
-            return f"only if {gated} said {'yes' if want else 'no'}; it said {said or 'nothing'}"
+        said = row.result.strip()
+        if choice:
+            if said.lower() != choice.lower():
+                return (f"only if {gated} was {choice}; it was "
+                        + (f'"{said}"' if said else "not answered"))
+        elif (said.lower() == "yes") != want:
+            return (f"only if {gated} said {'yes' if want else 'no'}; it said "
+                    f"{said.lower() or 'nothing'}")
     for other in sorted(step.uses() | set(step.after)):
         if rows[other].state == "skipped":
             return f"{other} was skipped"
+    if step.after_any and all(rows[o].state == "skipped" for o in step.after_any):
+        return f"{', '.join(step.after_any)} were all skipped"
     return ""
 
 
 def _waiting_words(step: rt.Step) -> str:
     if step.kind == "person":
         return f"your answer ({step.id})"
+    if step.kind == "repeat":
+        return f"the next pass ({step.id})"
     return f"the clock ({step.id})"
 
 

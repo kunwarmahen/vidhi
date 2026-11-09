@@ -1,6 +1,15 @@
 """The marketplace: anyone may publish a routine; only a reviewed one is
 listed, and only a signed one is installed.
 
+TWO KINDS OF THING ARE SHARED. A routine (routine.py), and an INDRIYA
+TEMPLATE: a reading for Prahari with blanks ("the outside temperature
+for {latitude}, {longitude}, every 15m"), said by ``kind = "indriya"`` at
+the top of its file. Both are published, reviewed, signed and checked
+the same way; Prahari installs an indriya template, filled in, with its
+owner's own accounts (``prahari indriya install NAME --from-market``,
+which fetches it through ``vidhi market get``). Nobody runs a reading
+for anybody else: each person runs their own copy.
+
     vidhi market publish FILE --to URL --as NAME     anyone: into the queue
     vidhi market queue --from URL                    what waits for review
     vidhi market show ID --from URL                  one, with the review notes
@@ -13,12 +22,31 @@ listed, and only a signed one is installed.
 and the server, ``vidhi market serve --dir DIR`` (or ``vidhi serve
 --market DIR``, on the page's own port):
 
-    GET  /market/index              the listed routines, newest version each
+    GET  /market/                   a page: what is listed, the reviewers'
+                                    keys, and how to fetch one
+    GET  /market/index              the listed things, newest version each
     GET  /market/routines/NAME      one: its TOML, signature and reviewer
+    GET  /market/reviewers          who may approve, with their public keys
     POST /market/publish            {toml, publisher, note}: into the queue
     GET  /market/queue              what waits, oldest first
     GET  /market/queue/ID           one, with the review notes
     POST /market/review/ID          {decision, reviewer, signature, why}
+
+REACHABLE FROM OUTSIDE, ALONE. ``vidhi market serve`` serves only
+``/market/`` -- no page of anybody's routines, no API -- so it can be
+put on the internet by itself (Tailscale Funnel: deploy/public-market-
+tailscale.sh), as Prahari's inlet is. Behind such a proxy every request
+comes from 127.0.0.1, so the address a publish is counted against is
+the proxy's ``X-Forwarded-For`` -- taken ONLY from a request that came
+from this computer, never from one that came straight in. The queue
+holds ``MAX_QUEUE`` at most: a flood fills it and stops, it doesn't fill
+the disk.
+
+THE REVIEWERS' KEYS ARE SHOWN, NOT TRUSTED FROM HERE. ``/market/reviewers``
+lists them so a person can compare them with what the reviewer published
+somewhere else; ``vidhi market trust`` is still each person's own act. A
+key a person trusts because the server said so would let a broken-into
+server sign for itself.
 
 ANYONE MAY PUBLISH; NOTHING PUBLISHED IS INSTALLABLE. A routine sent in
 is read and checked (it must parse: no loops, no unknown keys) and waits
@@ -78,6 +106,15 @@ REJECT_NAMESPACE = "vidhi-reject"
 MAX_ROUTINE = 64 * 1024
 #: Routines one address may publish in an hour.
 PUBLISH_PER_HOUR = 10
+#: Things waiting for review, at most: past it, publishing waits.
+MAX_QUEUE = 100
+#: What a file in the marketplace can be.
+KINDS = ("routine", "indriya")
+#: What an indriya template may say at its top, and in its check.
+INDRIYA_TOP = {"kind", "name", "title", "about", "version", "author", "thing", "every",
+               "pushed", "share", "inputs", "check"}
+INDRIYA_CHECK = {"tool", "args", "pick"}
+INDRIYA_INPUTS = ("text", "number")
 REVIEWER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$")
 ID_RE = re.compile(r"^[a-f0-9]{12}$")
 QUICK = 30.0
@@ -211,8 +248,112 @@ def reaches(routine: rt.Routine) -> list[str]:
     return sorted(hosts)
 
 
+# -- what a file is ----------------------------------------------------------------
+
+
+def kind_of(text: str) -> str:
+    """``routine`` or ``indriya``, from the file's own ``kind`` (a routine
+    says none)."""
+    import tomllib
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise MarketError(f"not TOML: {exc}") from None
+    kind = str(data.get("kind") or "routine")
+    if kind not in KINDS:
+        raise MarketError(f"kind is {' or '.join(KINDS)}, not {kind!r}")
+    return kind
+
+
+def read_item(text: str) -> dict:
+    """What a marketplace says about a file: its kind, name, title,
+    version, about, cost and what it touches -- or an error in words."""
+    if kind_of(text) == "routine":
+        routine = rt.parse(text)
+        return {"kind": "routine", "name": routine.name, "title": routine.title,
+                "version": routine.version, "about": routine.about,
+                "cost": rt.cost(routine), "touches": rt.touches(routine)}
+    data = indriya_template(text)
+    return {"kind": "indriya", "name": data["name"], "title": data["title"],
+            "version": data["version"], "about": data["about"], "cost": "no model",
+            "touches": indriya_touches(data)}
+
+
+def indriya_template(text: str) -> dict:
+    """An indriya template's shape, checked here; its full check is
+    Prahari's, when it is installed. A template is ONE call (or a value
+    pushed in), a pick, how often, and blanks: no code, nothing else."""
+    import tomllib
+    data = tomllib.loads(text)
+    unknown = sorted(set(data) - INDRIYA_TOP)
+    if unknown:
+        raise MarketError(f"unknown keys for an indriya template: {', '.join(unknown)}")
+    name = str(data.get("name") or "")
+    if not rt.NAME_RE.match(name):
+        raise MarketError(f"name {name!r}: one short lowercase word (outside-temp)")
+    pushed = data.get("pushed", False)
+    if not isinstance(pushed, bool):
+        raise MarketError("pushed is true or false")
+    check = data.get("check") or {}
+    if not isinstance(check, dict) or set(check) - INDRIYA_CHECK:
+        raise MarketError("check is a table: tool, args, pick")
+    if pushed and check.get("tool"):
+        raise MarketError("a pushed indriya makes no call: leave out check.tool")
+    if not pushed:
+        tool = check.get("tool")
+        if not isinstance(tool, str) or not tool.strip() or " " in tool.strip():
+            raise MarketError("check.tool is a tool's exact name (web_fetch)")
+        if not isinstance(check.get("args", {}), dict):
+            raise MarketError("check.args is a table: args = { url = \"...\" }")
+    if not isinstance(check.get("pick", ""), str):
+        raise MarketError("check.pick is words: json:a.b, number, text:PATTERN")
+    every = str(data.get("every") or "15m")
+    try:
+        if rt.duration(every) < rt.MIN_EVERY:
+            raise MarketError("every is 5 minutes at the least")
+    except rt.RoutineError as exc:
+        raise MarketError(str(exc)) from None
+    inputs = data.get("inputs") or {}
+    if not isinstance(inputs, dict):
+        raise MarketError("inputs is a table of tables: [inputs.latitude] kind = \"number\"")
+    for key, spec in inputs.items():
+        spec = spec if isinstance(spec, dict) else {}
+        if not rt.STEP_RE.match(key) or str(spec.get("kind") or "text") not in INDRIYA_INPUTS:
+            raise MarketError(f"input {key!r}: one lowercase word, kind text or number")
+    for found in rt.REF_RE.finditer(json.dumps(check)):
+        if found.group(1) != "inputs" or (found.group(2) or "") not in inputs:
+            raise MarketError(f"{found.group(0)} is not one of this template's inputs")
+    return {"name": name, "title": str(data.get("title") or name)[:120],
+            "version": str(data.get("version") or "1")[:20],
+            "about": str(data.get("about") or "")[:2000], "every": every,
+            "pushed": pushed, "check": check, "inputs": inputs,
+            "thing": str(data.get("thing") or "")}
+
+
+def indriya_touches(data: dict) -> list[str]:
+    if data["pushed"]:
+        return [f"waits for a value sent in (Home Assistant, a webhook), one every "
+                f"{data['every']} at least; makes no call"]
+    return [f"calls {data['check']['tool']} every {data['every']}, with no model: "
+            f"{json.dumps(data['check'].get('args') or {})[:200]}",
+            "with your own accounts, as you"]
+
+
 def review_notes(text: str) -> list[str]:
-    """What a reviewer should look at, worked out from the routine itself."""
+    """What a reviewer should look at, worked out from the file itself."""
+    if kind_of(text) == "indriya":
+        data = indriya_template(text)
+        notes = ["an indriya template (a reading for Prahari); no model"]
+        if not data["pushed"] and data["check"]["tool"] not in PLAIN_READS \
+                and not data["check"]["tool"].startswith("mcp__"):
+            notes.append(f"CALLS {data['check']['tool']}, which is not a plain read: check "
+                         "what it does")
+        hosts = sorted({urllib.parse.urlparse(u).netloc
+                        for v in _strings(data["check"].get("args") or {})
+                        for u in re.findall(r"https?://[^\s\"'{}]+", v)})
+        if hosts:
+            notes.append("reaches: " + ", ".join(hosts))
+        return notes + [f"touches: {line}" for line in indriya_touches(data)]
     routine = rt.parse(text)
     notes = [f"{len(routine.steps)} steps; {rt.cost(routine)}"]
     notes += look_closer(routine)
@@ -252,7 +393,7 @@ class Market:
         self._published: dict[str, deque] = {}
 
     @property
-    def reviewers(self) -> Path:
+    def reviewers_file(self) -> Path:
         return self.root / "reviewers"
 
     def publish(self, text: str, publisher: str, note: str = "", *,
@@ -262,7 +403,9 @@ class Market:
         publisher = publisher.strip()
         if not REVIEWER_RE.match(publisher):
             raise MarketError("publisher is your name, one word")
-        routine = rt.parse(text)
+        item = read_item(text)
+        if len(list((self.root / "queue").iterdir())) >= MAX_QUEUE:
+            raise MarketError(f"{MAX_QUEUE} things already wait for review; try later")
         with self._lock:
             sent = self._published.setdefault(address, deque())
             hour_ago = time.monotonic() - 3600
@@ -276,9 +419,9 @@ class Market:
         folder = self.root / "queue" / ident
         folder.mkdir(parents=True)
         (folder / "routine.toml").write_text(text)
-        meta = {"id": ident, "name": routine.name, "title": routine.title,
-                "version": routine.version, "publisher": publisher, "note": note[:1000],
-                "submitted_at": iso(now_utc())}
+        meta = {"id": ident, "kind": item["kind"], "name": item["name"],
+                "title": item["title"], "version": item["version"], "publisher": publisher,
+                "note": note[:1000], "submitted_at": iso(now_utc())}
         (folder / "meta.json").write_text(json.dumps(meta, indent=2))
         return {**meta, "status": "waiting for review"}
 
@@ -295,7 +438,7 @@ class Market:
         text = (folder / "routine.toml").read_text()
         try:
             notes = review_notes(text)
-        except rt.RoutineError as exc:
+        except (rt.RoutineError, MarketError) as exc:
             notes = [f"does not read: {exc}"]
         return {**_meta(folder), "toml": text, "notes": notes}
 
@@ -305,13 +448,17 @@ class Market:
         text = (folder / "routine.toml").read_text()
         meta = _meta(folder)
         if decision == "approve":
-            signer = verify(text, signature, self.reviewers)
+            signer = verify(text, signature, self.reviewers_file)
             if signer != reviewer:
                 raise MarketError(f"signed by {signer}, not {reviewer}")
-            routine = rt.parse(text)
-            target = self.root / "listed" / routine.name / _safe(routine.version)
+            item = read_item(text)
+            target = self.root / "listed" / item["name"] / _safe(item["version"])
+            other = self._kind_listed(item["name"])
+            if other and other != item["kind"]:
+                raise MarketError(f"{item['name']} is already listed as {_a(other)}; "
+                                  f"{_a(item['kind'])} needs another name")
             if target.exists():
-                raise MarketError(f"{routine.name} version {routine.version} is already "
+                raise MarketError(f"{item['name']} version {item['version']} is already "
                                   "listed; a new one needs a new version")
             target.mkdir(parents=True)
             (target / "routine.toml").write_text(text)
@@ -323,7 +470,7 @@ class Market:
         if decision == "reject":
             if not why.strip():
                 raise MarketError("a rejection says why")
-            signer = verify(_reject_words(ident, why), signature, self.reviewers,
+            signer = verify(_reject_words(ident, why), signature, self.reviewers_file,
                             namespace=REJECT_NAMESPACE)
             if signer != reviewer:
                 raise MarketError(f"signed by {signer}, not {reviewer}")
@@ -343,12 +490,38 @@ class Market:
             newest = max(versions, key=lambda v: (_meta(v).get("approved_at") or ""))
             meta = _meta(newest)
             try:
-                routine = rt.parse((newest / "routine.toml").read_text())
-                meta.update(about=routine.about, cost=rt.cost(routine),
-                            touches=rt.touches(routine))
-            except rt.RoutineError:
+                item = read_item((newest / "routine.toml").read_text())
+            except (rt.RoutineError, MarketError):
                 continue
+            meta.update(kind=item["kind"], about=item["about"], cost=item["cost"],
+                        touches=item["touches"])
             out.append(meta)
+        return out
+
+    def _kind_listed(self, name: str) -> str:
+        """The kind already listed under ``name``, or ""."""
+        folder = self.root / "listed" / _safe(name)
+        for version in (folder.iterdir() if folder.is_dir() else []):
+            path = version / "routine.toml"
+            if path.is_file():
+                try:
+                    return kind_of(path.read_text())
+                except MarketError:
+                    continue
+        return ""
+
+    def reviewers(self) -> list[dict]:
+        """Who may approve here, each with their public key: for a person
+        to compare with what the reviewer published elsewhere."""
+        out = []
+        lines = self.reviewers_file.read_text().splitlines() \
+            if self.reviewers_file.is_file() else []
+        for line in lines:
+            words = line.split()
+            if len(words) >= 3:
+                out.append({"name": words[0], "key": f"{words[-2]} {words[-1]}",
+                            "trust": f"vidhi market trust {words[0]} "
+                                     f"'{words[-2]} {words[-1]}'"})
         return out
 
     def listed(self, name: str) -> dict:
@@ -358,7 +531,8 @@ class Market:
         if not versions:
             raise MarketError(f"no routine {name} is listed")
         newest = max(versions, key=lambda v: (_meta(v).get("approved_at") or ""))
-        return {**_meta(newest), "toml": (newest / "routine.toml").read_text(),
+        text = (newest / "routine.toml").read_text()
+        return {**_meta(newest), "kind": kind_of(text), "toml": text,
                 "signature": (newest / "routine.toml.sig").read_text()}
 
     def _queued(self, ident: str) -> Path:
@@ -368,6 +542,10 @@ class Market:
         if not (folder / "routine.toml").is_file():
             raise MarketError("no such routine in the queue (reviewed already?)")
         return folder
+
+
+def _a(kind: str) -> str:
+    return ("an " if kind[:1] in "aeiou" else "a ") + kind
 
 
 def _reject_words(ident: str, why: str) -> str:
@@ -416,8 +594,8 @@ def _http(method: str, url: str, body: dict | None = None) -> dict | list:
 
 def publish(base: str, text: str, publisher: str, note: str = "") -> dict:
     try:
-        rt.parse(text)     # say what's wrong here, not after a round trip
-    except rt.RoutineError as exc:
+        read_item(text)    # say what's wrong here, not after a round trip
+    except (rt.RoutineError, MarketError) as exc:
         raise MarketError(f"it does not read: {exc}") from None
     return _http("POST", _url(base, "/market/publish"),
                  {"toml": text, "publisher": publisher, "note": note})
@@ -450,18 +628,75 @@ def index(base: str) -> list:
     return _http("GET", _url(base, "/market/index"))
 
 
+def reviewers(base: str) -> list:
+    return _http("GET", _url(base, "/market/reviewers"))
+
+
 def get(base: str, name: str, state: Path) -> tuple[Path, str]:
-    """Fetch a listed routine, check its signature against the reviewers
-    THIS person trusts, and keep it as a template: (where, signed by)."""
+    """Fetch a listed routine or indriya template, check its signature
+    against the reviewers THIS person trusts, and keep it as a template:
+    (where, signed by). An indriya template is kept apart
+    (``market/indriyas/``): it is Prahari's to install, not a routine."""
     item = _http("GET", _url(base, f"/market/routines/{urllib.parse.quote(name)}"))
     text, signature = str(item.get("toml") or ""), str(item.get("signature") or "")
     signer = verify(text, signature, trusted_file(state))
-    routine = rt.parse(text)
-    folder = Path(state) / "market"
+    found = read_item(text)
+    folder = Path(state) / "market" / ("indriyas" if found["kind"] == "indriya" else "")
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{routine.name}.toml"
+    path = folder / f"{found['name']}.toml"
     path.write_text(text)
     Path(str(path) + ".sig").write_text(signature)
-    (folder / f"{routine.name}.signer").write_text(signer + "\n")
-    (folder / f"{routine.name}.from").write_text(_url(base, "") + "\n")
+    (folder / f"{found['name']}.signer").write_text(signer + "\n")
+    (folder / f"{found['name']}.from").write_text(_url(base, "") + "\n")
     return path, signer
+
+
+# -- the marketplace's own page -----------------------------------------------------
+
+
+def page(shop: Market, base: str = "") -> bytes:
+    """``GET /market/``: what is listed, who reviews, and how to fetch one,
+    for somebody who found the address and has nothing else."""
+    from html import escape as e
+    rows = []
+    for item in shop.index():
+        how = (f"prahari indriya install {item['name']} --from-market"
+               if item.get("kind") == "indriya" else f"vidhi market get {item['name']}")
+        rows.append(f"<li><b>{e(item['title'])}</b> <code>{e(item['name'])}</code> "
+                    f"v{e(str(item['version']))} · {e(item.get('kind') or 'routine')} · "
+                    f"{e(item.get('cost') or '')}<br><small>by {e(item.get('publisher') or '')}"
+                    f", reviewed by {e(item.get('reviewer') or '')}</small>"
+                    + (f"<p>{e(item['about'])}</p>" if item.get("about") else "")
+                    + "<ul>" + "".join(f"<li>{e(t)}</li>" for t in item.get("touches") or [])
+                    + f"</ul><pre>{e(how)}</pre></li>")
+    keys = "".join(f"<li><b>{e(r['name'])}</b><pre>{e(r['trust'])}</pre></li>"
+                   for r in shop.reviewers())
+    where = e(base or "THIS-ADDRESS")
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vidhi marketplace</title><style>
+:root {{ color-scheme: light dark; --bg: #faf8f3; --ink: #1d1b16; --soft: #6f6a62; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg: #17161a; --ink: #ece8df;
+  --soft: #a49e94; }} }}
+body {{ background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif;
+  max-width: 46rem; margin: 0 auto; padding: 1.5rem 16px; }}
+small, .soft {{ color: var(--soft); }} li {{ margin: .6rem 0; }}
+pre {{ white-space: pre-wrap; word-break: break-all; font-size: 13px; }}
+</style></head><body>
+<h1>Vidhi marketplace</h1>
+<p class="soft">Routines and readings people wrote, each read and signed by a reviewer
+before it is listed. Nothing here runs anything: you fetch one, read it, and install it
+on your own computer, where it runs with your accounts and your permissions.</p>
+<h2>Listed</h2><ul>{"".join(rows) or "<li class='soft'>nothing yet</li>"}</ul>
+<h2>Fetch one</h2>
+<pre>export VIDHI_MARKET={where}
+vidhi market trust REVIEWER 'ssh-ed25519 AAAA...'   # a reviewer you trust
+vidhi market get NAME                               # checked against YOUR trust list</pre>
+<h2>Reviewers</h2>
+<p class="soft">Their keys, as this marketplace has them. Compare a key with the one the
+reviewer published somewhere else before you trust it: a key trusted because this page
+said so is only as safe as this page.</p>
+<ul>{keys or "<li class='soft'>none yet</li>"}</ul>
+<h2>Publish</h2>
+<pre>vidhi market publish my-routine.toml --to {where} --as YOUR-NAME</pre>
+</body></html>""".encode()

@@ -198,3 +198,105 @@ def test_a_fetched_template_read_before_install_says_its_signature(served, keys,
     assert look()["signed"] == "signed by rita"
     path.write_text(ROUTINE.replace('notify = "hello"', 'notify = "changed"'))
     assert look()["signed"].startswith("NOT INSTALLABLE")
+
+
+# -- an indriya template, the public road, and the reviewers' keys ------------------
+# BIAS: a marketplace on the internet, so against a reading template that
+# smuggles in more than one call, an indriya template fetched as if it were
+# a routine, an address that lies its way past the publish limit, a queue
+# that fills a disk, and a reviewer's key trusted because the server said so.
+
+TEMP = '''kind = "indriya"
+name = "outside-temp"
+title = "Outside temperature"
+version = "1"
+thing = "the outside temperature"
+every = "15m"
+[inputs.latitude]
+kind = "number"
+[inputs.longitude]
+kind = "number"
+[check]
+tool = "web_fetch"
+args = { url = "URL" }
+pick = "json:current.temperature_2m"
+'''.replace("URL", "https://api.open-meteo.com/v1/forecast?latitude={{inputs.latitude}}"
+                    "&longitude={{inputs.longitude}}&current=temperature_2m")
+
+
+def test_an_indriya_template_is_read_as_one_call_with_blanks():
+    item = market.read_item(TEMP)
+    assert item["kind"] == "indriya" and item["cost"] == "no model"
+    assert item["touches"][0].startswith("calls web_fetch every 15m, with no model")
+    notes = market.review_notes(TEMP)
+    assert "reaches: api.open-meteo.com" in notes
+
+
+def test_an_indriya_template_with_more_than_its_shape_is_refused():
+    with pytest.raises(market.MarketError, match="unknown keys"):
+        market.read_item(TEMP + '[[steps]]\nid = "x"\nnotify = "hi"\n')
+    with pytest.raises(market.MarketError, match="not one of this template's inputs"):
+        market.read_item(TEMP.replace("{{inputs.longitude}}", "{{inputs.city}}"))
+    with pytest.raises(market.MarketError, match="5 minutes at the least"):
+        market.read_item(TEMP.replace('every = "15m"', 'every = "1m"'))
+    with pytest.raises(market.MarketError, match="kind is routine or indriya"):
+        market.read_item(TEMP.replace('kind = "indriya"', 'kind = "script"'))
+
+
+def test_an_indriya_template_is_fetched_apart_from_the_routines(served, keys, state):
+    queued = market.publish(served, TEMP, "pat")
+    market.approve(served, queued["id"], keys["rita"][0], "rita")
+    assert [(i["name"], i["kind"]) for i in market.index(served)] == [("outside-temp",
+                                                                       "indriya")]
+    market.trust(state, "rita", keys["rita"][1])
+    path, signer = market.get(served, "outside-temp", state)
+    assert path.parent.name == "indriyas" and signer == "rita"
+    found, _ = catalog.templates(state)
+    assert "outside-temp" not in [t.routine.name for t in found]
+
+
+def test_one_name_is_one_kind_of_thing(served, keys):
+    first = market.publish(served, TEMP, "pat")
+    market.approve(served, first["id"], keys["rita"][0], "rita")
+    routine = ROUTINE.replace('name = "hello"', 'name = "outside-temp"')
+    second = market.publish(served, routine, "pat")
+    with pytest.raises(market.MarketError, match="already listed as an indriya"):
+        market.approve(served, second["id"], keys["rita"][0], "rita")
+
+
+def test_the_reviewers_keys_are_shown_with_how_to_trust_them(served, keys):
+    found = market.reviewers(served)
+    assert [r["name"] for r in found] == ["rita"]
+    assert found[0]["key"] == " ".join(keys["rita"][1].split()[:2])
+    assert found[0]["trust"].startswith("vidhi market trust rita 'ssh-ed25519 ")
+
+
+def test_the_marketplace_has_a_page_for_someone_who_found_its_address(served, keys):
+    import urllib.request
+
+    queued = market.publish(served, TEMP, "pat")
+    market.approve(served, queued["id"], keys["rita"][0], "rita")
+    with urllib.request.urlopen(served + "/market/") as response:
+        html = response.read().decode()
+        assert response.headers["Content-Type"].startswith("text/html")
+    assert "Outside temperature" in html and "prahari indriya install outside-temp" in html
+    assert "vidhi market trust rita" in html
+
+
+def test_a_forwarded_address_counts_only_from_this_computers_proxy():
+    from vidhi.http import market_peer
+
+    class Seen:
+        def __init__(self, peer, forwarded):
+            self.client_address = (peer, 1)
+            self.headers = {"X-Forwarded-For": forwarded}
+    assert market_peer(Seen("127.0.0.1", "9.9.9.9, 10.0.0.1")) == "9.9.9.9"
+    assert market_peer(Seen("8.8.8.8", "9.9.9.9")) == "8.8.8.8"
+
+
+def test_a_full_queue_stops_publishing_instead_of_filling_the_disk(shop, monkeypatch):
+    monkeypatch.setattr(market, "MAX_QUEUE", 2)
+    shop.publish(ROUTINE, "pat", address="a")
+    shop.publish(ROUTINE, "pat", address="b")
+    with pytest.raises(market.MarketError, match="already wait for review"):
+        shop.publish(ROUTINE, "pat", address="c")

@@ -107,8 +107,8 @@ spot; they're now laid out by when they run.
 
 ## Not here
 
-* **A public address for the marketplace.** It runs where it's started;
-  putting it on the internet is the same choice as Prahari's public
-  inlet.
+* ~~**A public address for the marketplace.**~~ Alone on its own port,
+  behind Tailscale Funnel, with a page and its reviewers' keys
+  ([06](06-a-marketplace-others-can-reach.md)).
 * **Revoking a signature.** Removing a reviewer from your own list stops
   new installs signed by them; routines already installed stay.

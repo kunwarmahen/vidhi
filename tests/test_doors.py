@@ -219,3 +219,16 @@ def test_a_plain_template_says_nothing_needs_a_closer_look(page):
     status, seen = _call(page, "GET", "/api/templates/morning-brief")
     assert seen["look_closer"] == [] and seen["source"] == "vidhi"
     assert seen["accounts"] == ["gmail"] and "api.open-meteo.com" in seen["reaches"]
+
+
+def test_a_marketplace_run_here_is_in_the_backup_and_none_is_not(state, tmp_path,
+                                                                   monkeypatch, capsys):
+    import json
+
+    monkeypatch.setenv("VIDHI_MARKET_DIR", str(tmp_path / "shop"))
+    cli.main(["--state", str(state), "keeps", "--json"])
+    assert [k["id"] for k in json.loads(capsys.readouterr().out)["keeps"]] == ["state"]
+    (tmp_path / "shop").mkdir()
+    cli.main(["--state", str(state), "keeps", "--json"])
+    keeps = json.loads(capsys.readouterr().out)["keeps"]
+    assert keeps[1]["id"] == "market" and keeps[1]["path"] == str(tmp_path / "shop")

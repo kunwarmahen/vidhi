@@ -36,10 +36,16 @@ side at the same time, and remembers where each run got to.
   look: a step that runs your agent with its tools, a call built from an
   earlier step's answer, a tool that isn't a plain read. **TOML** shows
   the exact file that would be kept.
-* **A routine can stop and ask you.** An *ask me* step puts a yes/no
-  question in your chat, with two buttons. The run waits, for a minute
-  or a day, with nothing held open. When you press **Yes**, on your
-  phone or the page, it carries on from there. No answer in time is no.
+* **A routine can stop and ask you.** An *ask me* step puts a question
+  in your chat: yes or no, or two or three choices (*Heat*, *Cool*,
+  *Leave it*), each a button, or a few words you type. The run waits,
+  for a minute or a day, with nothing held open. When you answer, on
+  your phone, the page or a notification, it carries on from there. No
+  answer in time is no.
+* **A routine can try again, a set number of times.** *"Look at the
+  temperature every 15 minutes until it's above 68, four times at
+  most."* The cap and the gap are written in the routine, where anyone
+  reading it sees them.
 * **Anything can start one.** **Run now** on the page; `/routines run 1`
   in a chat; *"do my morning brief"* to your agent; a Samay schedule
   (*every day at 7:00*); a Prahari watch (*when the porch gets below
@@ -134,13 +140,19 @@ notify = "{{wear}}"
 | `read = "NAME"` | a reading Prahari keeps (an indriya); `max_age = "5m"` reads it again if older | its value |
 | `check = "{{x}}"` and one of `below`, `above`, `at_most`, `at_least`, `equals`, `contains`, `lacks`, `matches` | a test, no model | `yes` or `no` |
 | `person = "..."`, `within = "2h"` | a yes/no question to you; the run waits | `yes`, or `no` (also when nobody answers in time) |
+| `person = "..."`, `choices = ["Heat", "Cool", "Leave it"]` | two or three choices, each a button | the choice, or nothing when nobody answers |
+| `person = "..."`, `typed = true` | a few words you type (`/routines say CODE ...`) | your words (fenced as outside text in an `ask`) |
 | `wait = "30m"` or `until = "07:30"` | a pause | nothing |
 | `notify = "..."` | a message on your channels | where it went |
+| `repeat = ["temp", "warm"]`, `until = "warm"`, `times = 4`, `every = "15m"` | those steps again, `every` apart (5m at least), until `until` says yes, `times` times at most (20) | `yes` (it got there) or `no` (it ran out) |
 
 Every step may also have `title`, `after = ["id"]` (wait for a step it
 doesn't use), `only_if = "go"` or `only_if = "not go"` (only when a
-`check` or `person` step said yes, or no), and `optional = true` (if it
-fails, it gives nothing and the run goes on).
+`check`, `person` or `repeat` step said yes, or no), `only_if = "mode is
+Heat"` (only when that choice was made), `after_any = ["plan", "sorry"]`
+(run when any one of those ran, with `{{any}}` its result: two branches
+joined again), and `optional = true` (if it fails, it gives nothing and
+the run goes on).
 
 `{{temp}}` is what the step `temp` gave; `{{temp.current.temperature_2m}}`
 a field of its JSON. `{{inputs.line}}` is an input, filled when the
@@ -151,9 +163,11 @@ the run's own.
 **The rules a routine is held to**, each against a way it goes wrong
 ([notes/01](notes/01-a-routine-drawn-once.md)):
 
-* **No loops and no code.** A routine that waits on itself is refused
-  when it's read, and there is no step that runs a program. Everything a
-  routine does is in the file, in words.
+* **No open-ended loops and no code.** A routine that waits on itself is
+  refused when it's read, and there is no step that runs a program. A
+  `repeat` always says how many times at most and when to stop.
+  Everything a routine does is in the file, in words
+  ([notes/05](notes/05-a-repeat-a-join-and-other-answers.md)).
 * **A call's arguments are your yes.** Each call runs with a grant fixing
   exactly its arguments, as a Prahari look does. A call whose arguments
   come from an earlier step can't have been seen, so it runs only if its
@@ -176,9 +190,11 @@ run dd7788e5 of coat-check: waiting -- waiting for your answer (go)
 ```
 
 The question goes to your chat through Dvara, with **Yes** and **No**
-buttons that send `/routines yes F9SEKQ` as if you'd typed it. It's also
-on Vidhi's page under **Waiting for you**, and `vidhi answer F9SEKQ yes`
-at a terminal. The run is rows on disk, not a process, so it can wait
+buttons that send `/routines yes F9SEKQ` as if you'd typed it (a choice's
+buttons send `/routines pick F9SEKQ 2`; typed words are `/routines say
+F9SEKQ ...`). On a phone's ntfy notification the same buttons are drawn,
+each carrying a mark, never a key. It's also on Vidhi's page under
+**Waiting for you**, and `vidhi answer F9SEKQ yes` at a terminal. The run is rows on disk, not a process, so it can wait
 for hours and survives a restart. An answer counts once, only from the
 person it was put to. [notes/02](notes/02-a-run-that-asks.md).
 
@@ -189,8 +205,8 @@ person it was put to. [notes/02](notes/02-a-run-that-asks.md).
 | Vidhi's page | **Run now** on its card, with this run's inputs |
 | a chat (Dvara) | `/routines` lists them; `/routines run 1` starts one; `/routines 1` says how it went |
 | your agent | *"do my morning brief"*: `run_routine`, after your yes on a card that lists everything it touches |
-| Samay | a schedule with `--runner vidhi` and the routine's name as its prompt (`samay add morning-brief --runner vidhi --when "at 07:00"`), or `routine` on the agent's `create_schedule` |
-| Prahari | a watch with `--routine NAME` (or `routine` on `create_watch`): when it fires, the routine starts with what it saw as `{{inputs.found}}` |
+| Samay | a schedule with `--runner vidhi` and the routine's name as its prompt (`samay add morning-brief --runner vidhi --when "at 07:00"`), or `routine` on the agent's `create_schedule`; `--input city=Cary` (or `routine_inputs`) gives that schedule its own values |
+| Prahari | a watch with `--routine NAME` (or `routine` on `create_watch`): when it fires, the routine starts with what it saw as `{{inputs.found}}`; `--input room=porch` (or `routine_inputs`) gives that watch its own values |
 | a program | `vidhi start NAME --as PERSON --by WHO` only adds the run; `vidhi serve` runs it |
 
 Starting is only adding a row to Vidhi's state folder. Samay's, Prahari's
@@ -213,8 +229,24 @@ the routine's exact bytes, and the private key never reaches the
 marketplace. **Checked against the reviewers you trust.** A broken-into
 server can't make a routine installable on your computer, and a routine
 changed after it was signed is refused. The marketplace is `vidhi market
-serve --dir DIR`, or `vidhi serve --market DIR` on the page's own port.
-[notes/04](notes/04-a-marketplace-with-review.md).
+serve` (kept in `~/.vidhi-market`), or `vidhi serve --market DIR` on the
+page's own port. [notes/04](notes/04-a-marketplace-with-review.md).
+
+**Readings are shared the same way.** A file that says `kind =
+"indriya"` is a Prahari reading with blanks (the outside temperature for
+a latitude and longitude): published, reviewed and signed like a
+routine, and installed with `prahari indriya install NAME
+--from-market`, which fetches it through `vidhi market get` and makes
+the person their own reading.
+
+**On the internet, alone.** `vidhi market serve` serves only `/market/`
+(no routines of yours, no runs, no API), so it can go on the internet by
+itself: `deploy/public-market-tailscale.sh` puts it behind Tailscale
+Funnel on port 10000. `GET /market/` is a page for somebody who found
+the address: what's listed, the reviewers' keys (to compare with what
+they published elsewhere, never to trust from there), and the commands.
+Set `VIDHI_MARKET` to its address and Vidhi's page shows what it lists
+with a **Get it** button. [notes/06](notes/06-a-marketplace-others-can-reach.md).
 
 ## Where things are
 
@@ -222,7 +254,12 @@ serve --dir DIR`, or `vidhi serve --market DIR` on the page's own port.
   questions (`$VIDHI_STATE` moves the folder).
 * `~/.vidhi/catalog/`: your own templates (**Save as template** on the
   canvas); `~/.vidhi/market/`: ones fetched from a marketplace, each with
-  its signature; `~/.vidhi/reviewers`: the reviewers you trust.
+  its signature (indriya templates under `market/indriyas/`);
+  `~/.vidhi/reviewers`: the reviewers you trust.
+* `~/.vidhi-market/` (`$VIDHI_MARKET_DIR`): a marketplace this computer
+  runs, its reviewers, queue and listed files. `VIDHI_MARKET`: the
+  marketplace you fetch from. `VIDHI_MARKET_PUBLIC_URL`: the address its
+  page tells people.
 * `VIDHI_YANTRA`, `VIDHI_YANTRA_HOME`: the Yantra that does the calls and
   questions, and where it runs. `VIDHI_PRAHARI`: the Prahari for
   readings. `VIDHI_DVARA_URL`, `VIDHI_DVARA_TOKEN`, `VIDHI_DVARA_ACTOR`:
@@ -233,7 +270,7 @@ serve --dir DIR`, or `vidhi serve --market DIR` on the page's own port.
 ```
 src/vidhi/
   routine.py   the format: reading, checking, waves, filling in, words
-               (notes/01)
+               (notes/01); repeat, after_any, choices (notes/05)
   store.py     one SQLite file: routines, runs, steps, questions
   runner.py    a run worked forward, side by side; stopping to ask,
                picked up again; one worker per run (notes/02)
@@ -242,16 +279,20 @@ src/vidhi/
                (notes/03)
   routines.py  installing, mending, pausing: one place for every door
   catalog.py   templates: yours, a marketplace's, Vidhi's own
-  market.py    publish, review, sign, fetch, check (notes/04)
+  market.py    publish, review, sign, fetch, check (notes/04); indriya
+               templates, reviewers, the public page (notes/06)
   http.py      the page's API, and the marketplace's routes
   mcp.py       seven tools for an agent; none writes a step
   status.py    `vidhi status --json`, for the family
-  keeps.py     `vidhi keeps --json`: the state folder, for a house backup
+  keeps.py     `vidhi keeps --json`: the state folder (and a marketplace
+               run here), for a house backup
   cli.py       `vidhi`
   static/      the page and its canvas
   catalog/     morning-brief, price-then-plan, cold-night
+deploy/
+  public-market-tailscale.sh   the marketplace alone, behind Tailscale Funnel
 ```
 
-`uv run pytest` runs the tests (85); `uv run ruff check src tests` the
+`uv run pytest` runs the tests (116); `uv run ruff check src tests` the
 lint. No dependencies: the standard library, plus OpenSSH's `ssh-keygen`
 for signatures.
