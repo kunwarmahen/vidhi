@@ -13,6 +13,7 @@ a chat can start.
     vidhi save NAME FILE                     mend one (the canvas does this too)
     vidhi serve                              the page, and the clock that runs
     vidhi mcp --for PERSON                   tools for an agent
+    vidhi keeps                              where it all is, for a backup
     vidhi market ...                         publish, review, fetch (market.py)
 
 ``--as PERSON`` acts for somebody in the house; leave it out for this
@@ -94,6 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--json", action="store_true", dest="json_out")
 
     p = sub.add_parser("status", help="is Vidhi here, is it running")
+    js(p)
+    p = sub.add_parser("keeps", help="where the routines are kept, for a backup")
     js(p)
     p = sub.add_parser("templates", help="routines ready to install")
     js(p)
@@ -228,6 +231,16 @@ def main(argv: list[str] | None = None) -> int:
             return _mcp(args, state)
         if args.command == "serve":
             return _serve(args, state)
+        if args.command == "keeps":
+            # before the store is opened: asking where never makes the file
+            from vidhi.keeps import report as keeps
+            said = keeps(state)
+            if args.json_out:
+                print(json.dumps(said))
+            else:
+                for place in said["keeps"]:
+                    print(f"{place['id']}  {place['path']}  ({place['what']})")
+            return 0
         store = Store.at(state)
         return COMMANDS[args.command](args, state, store)
     except (rt.RoutineError, RunError, market.MarketError) as exc:

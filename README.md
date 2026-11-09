@@ -238,11 +238,12 @@ src/vidhi/
   http.py      the page's API, and the marketplace's routes
   mcp.py       seven tools for an agent; none writes a step
   status.py    `vidhi status --json`, for the family
+  keeps.py     `vidhi keeps --json`: the state folder, for a house backup
   cli.py       `vidhi`
   static/      the page and its canvas
   catalog/     morning-brief, price-then-plan, cold-night
 ```
 
-`uv run pytest` runs the tests (81); `uv run ruff check src tests` the
+`uv run pytest` runs the tests (82); `uv run ruff check src tests` the
 lint. No dependencies: the standard library, plus OpenSSH's `ssh-keygen`
 for signatures.

@@ -168,3 +168,12 @@ def test_an_error_is_said_and_is_json_for_a_program(state, capsys):
     assert cli.main(["--state", str(state), "start", "nothing", "--json"]) == 1
     out = capsys.readouterr().out.strip().splitlines()[-1]
     assert "local has no routine nothing" in json.loads(out)["error"]
+
+
+def test_keeps_says_where_and_never_makes_the_file(state, capsys):
+    assert cli.main(["--state", str(state), "keeps", "--json"]) == 0
+    said = json.loads(capsys.readouterr().out)
+    assert said["format"] == "vidhi.keeps.v1"
+    assert said["keeps"][0]["path"] == str(state.resolve())
+    assert "serve.lock" in said["keeps"][0]["leave_out"]
+    assert not (state / "vidhi.sqlite").exists()
