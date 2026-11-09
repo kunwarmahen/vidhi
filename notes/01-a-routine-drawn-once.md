@@ -22,9 +22,10 @@ it:
 | `ask` | `yantra --prompt`: the model, with no tools unless `tools = true` |
 | `read` | `prahari indriya get`: a reading Prahari keeps |
 | `check` | Vidhi: a test on a value, the words a Prahari watch uses |
-| `person` | a yes/no to the person, through Dvara ([02](02-a-run-that-asks.md)) |
+| `person` | a question to the person, through Dvara: yes/no ([02](02-a-run-that-asks.md)), choices or a few words ([05](05-a-repeat-a-join-and-other-answers.md)) |
 | `wait` | Vidhi's clock |
 | `notify` | Dvara's `/notify`: the person's own channels |
+| `repeat` | Vidhi's clock: some steps again, a set number of times at most ([05](05-a-repeat-a-join-and-other-answers.md)) |
 
 Results flow on: `{{weather}}` in a step is what `weather` gave.
 
@@ -41,7 +42,9 @@ runs a program. That is a limit, and it is the point: a routine someone
 else wrote can be read in full before it is installed. Every call, every
 address, every question to the model is in the file, and `touches()`
 says each in words. A loop or a script would be the one part a reader
-couldn't check.
+couldn't check. (A `repeat` is the one way round, and it states its cap
+and its stop line where a reader sees them:
+[05](05-a-repeat-a-join-and-other-answers.md).)
 
 **A BRANCH IS A STEP THAT SAYS YES OR NO.** `check` and `person` give
 `yes` or `no`; `only_if = "go"` runs a step only on yes, `only_if = "not

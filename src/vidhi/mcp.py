@@ -22,7 +22,7 @@ right. A routine is drawn on Vidhi's page, or written as TOML, by a
 person.
 
 NO TOOL ANSWERS A ROUTINE'S QUESTION. A ``person`` step asks the person,
-in their chat, with two buttons. If the agent could answer it, the
+in their chat, with its buttons (or a box for words). If the agent could answer it, the
 question would be asking the agent. So there is no such tool.
 
 THE FOUR WRITES ARE ASKED ABOUT. The reads say ``readOnlyHint: true``

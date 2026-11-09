@@ -10,7 +10,7 @@ Continues [01](01-a-routine-drawn-once.md).
 ## Anyone publishes; nothing published is installable
 
 `vidhi market publish FILE --to URL --as NAME` sends a routine. The
-marketplace reads it (it must parse: no loops, no unknown keys) and
+marketplace reads it (it must parse: no open-ended loops, no unknown keys) and
 keeps it in a **queue**, where nobody can install it. At most ten an hour
 from one address.
 

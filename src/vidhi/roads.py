@@ -27,9 +27,10 @@ person said yes to runs, and nothing else does. A call whose arguments
 came from an earlier step gets no grant, and runs only if its tool only
 reads.
 
-A QUESTION TO THE PERSON IS A NOTICE WITH TWO BUTTONS. ``tell`` passes
+A QUESTION TO THE PERSON IS A NOTICE WITH BUTTONS. ``tell`` passes
 ``taps``: words a channel draws as buttons, which a press sends as if
-typed (``/routines yes K7Q2MX``). The words are in the text too, for a
+typed (``/routines yes K7Q2MX``, or a choice's ``/routines pick K7Q2MX
+2``); a question that takes words has none. The words are in the text too, for a
 channel that draws no buttons.
 """
 
