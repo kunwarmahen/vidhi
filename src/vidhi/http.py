@@ -15,6 +15,8 @@ served by ``vidhi serve``.
                               asks on every change: what's wrong, the waves, the
                               words of what it touches)
     GET    /api/templates                      what can be installed
+    GET    /api/templates/NAME                 one, to read before installing: its exact
+                                               text, its steps, what to look at closer
     POST   /api/templates     {toml}           keep one as this computer's own
     GET    /api/runs?owner=&routine=&limit=    newest first
     GET    /api/runs/ID                        one, each step and what it gave
@@ -124,6 +126,8 @@ class Api:
             if method == "POST":
                 path = catalog.save_mine(self.state, self._text(body))
                 return 201, {"saved": str(path)}
+        if len(parts) == 2 and parts[0] == "templates" and method == "GET":
+            return 200, look_inside(self.state, parts[1])
         if parts == ["routines"]:
             if method == "GET":
                 return 200, [installed_card(r) for r in self.store.routines()]
@@ -202,6 +206,27 @@ class Api:
             changed = getattr(routines, verb)(self.store, owner, name)
             return 200, installed_card(changed)
         raise ApiError(404, "not found")
+
+
+def look_inside(state: Path, name: str) -> dict:
+    """A template as it would be installed, for reading before a yes: its
+    exact text, its steps as drawn, and what deserves a second look. Nothing
+    is installed or run. A marketplace template's signature is checked
+    again now, against the reviewers this person trusts."""
+    found = catalog.template(state, name)
+    routine = found.routine
+    signed = ""
+    if found.source == "market":
+        try:
+            signed = "signed by " + market.check_installable(state, Path(found.path),
+                                                             found.text)
+        except market.MarketError as exc:
+            signed = f"NOT INSTALLABLE: {exc}"
+    return {"name": routine.name, "toml": found.text, "routine": routine.as_dict(),
+            "source": found.source, "signed": signed, "waves": routine.order(),
+            "cost": rt.cost(routine), "touches": rt.touches(routine),
+            "look_closer": market.look_closer(routine), "reaches": market.reaches(routine),
+            "accounts": rt.needs_accounts(routine), "steps": len(routine.steps)}
 
 
 def check(text: str) -> dict:

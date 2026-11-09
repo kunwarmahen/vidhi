@@ -175,26 +175,50 @@ def check_installable(state: Path, path: Path, text: str) -> str:
     return verify(text, sig.read_text(), trusted_file(state))
 
 
-def review_notes(text: str) -> list[str]:
-    """What a reviewer should look at, worked out from the routine itself."""
-    routine = rt.parse(text)
-    notes = [f"{len(routine.steps)} steps; {rt.cost(routine)}"]
+#: Tools a call may use that are plainly reading: anything else is said.
+PLAIN_READS = ("web_fetch", "read_file", "list_dir", "grep", "glob")
+
+
+def look_closer(routine: rt.Routine) -> list[str]:
+    """What deserves a second look before a yes, in capitals: a step that
+    runs the agent with its tools, a call whose arguments come from an
+    earlier step, a tool that is neither a plain read nor a connected
+    account's. A reviewer is shown these; so is a person about to install."""
+    out = []
+    for step in routine.steps:
+        name = step.title or step.id
+        if step.kind == "ask" and step.tools:
+            out.append(f"{name}: RUNS YOUR AGENT WITH ITS TOOLS (each still asked as your "
+                       "rules say)")
+        if step.kind == "call":
+            if rt.uses_results(step.args):
+                out.append(f"{name}: CALLS {step.body} WITH WHAT AN EARLIER STEP FOUND "
+                           "(it runs only if that tool only reads)")
+            if step.body not in PLAIN_READS and not step.body.startswith("mcp__"):
+                out.append(f"{name}: CALLS {step.body}, which is not a plain read: check "
+                           "what it does")
+    return out
+
+
+def reaches(routine: rt.Routine) -> list[str]:
+    """Every web address a routine's calls name."""
     hosts: set[str] = set()
     for step in routine.steps:
         if step.kind == "call":
             for value in _strings(step.args):
                 for url in re.findall(r"https?://[^\s\"'{}]+", value):
                     hosts.add(urllib.parse.urlparse(url).netloc)
-            if rt.uses_results(step.args):
-                notes.append(f"step {step.id}: calls {step.body} with an earlier step's "
-                             "result (runs only if that tool only reads)")
-            if not step.body.startswith(("web_fetch", "mcp__")) and step.body not in (
-                    "read_file", "list_dir", "grep", "glob"):
-                notes.append(f"step {step.id}: calls {step.body} -- check what it does")
-        if step.kind == "ask" and step.tools:
-            notes.append(f"step {step.id}: runs the person's AGENT WITH ITS TOOLS")
+    return sorted(hosts)
+
+
+def review_notes(text: str) -> list[str]:
+    """What a reviewer should look at, worked out from the routine itself."""
+    routine = rt.parse(text)
+    notes = [f"{len(routine.steps)} steps; {rt.cost(routine)}"]
+    notes += look_closer(routine)
+    hosts = reaches(routine)
     if hosts:
-        notes.append("reaches: " + ", ".join(sorted(hosts)))
+        notes.append("reaches: " + ", ".join(hosts))
     accounts = rt.needs_accounts(routine)
     if accounts:
         notes.append("needs accounts: " + ", ".join(accounts))

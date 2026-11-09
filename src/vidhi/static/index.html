@@ -134,6 +134,13 @@ path.edge.gate { stroke: var(--accent); stroke-dasharray: 7 5; }
 path.edge.hit { stroke: transparent; stroke-width: 12; cursor: pointer; }
 text.elabel { font: 11px var(--sans); fill: var(--accent); }
 path.drag { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; }
+#editor.reading .edit-only { display: none !important; }
+#e-mode { display: none; }
+#editor.reading #e-mode { display: inline-block; }
+.closer { border: 1px solid var(--bad); border-radius: 8px; padding: 8px 12px; margin: 10px 0;
+          color: var(--bad); font-size: 13px; }
+.closer.calm { border-color: var(--ok); color: var(--ok); }
+.closer ul { margin: 6px 0 0; padding-left: 18px; }
 @media (max-width: 760px) {
   .ebody { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
   .side { border-left: none; border-top: 1px solid var(--line); }
@@ -171,12 +178,13 @@ path.drag { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray
 <div id="editor" class="hidden" role="dialog" aria-label="Draw a routine">
   <div class="ebar">
     <span class="name" id="e-name">…</span>
-    <span class="add" id="e-add"></span>
+    <span class="pill waiting" id="e-mode">reading only: not installed, nothing runs</span>
+    <span class="add edit-only" id="e-add"></span>
     <span class="grow"></span>
     <button id="e-arrange" title="Lay the steps out by when they run">Arrange</button>
     <button id="e-toml">TOML</button>
-    <button id="e-template" title="Keep a copy as one of this computer's templates">Save as template</button>
-    <button id="e-save" class="main">Save</button>
+    <button id="e-template" class="edit-only" title="Keep a copy as one of this computer's templates">Save as template</button>
+    <button id="e-save" class="main edit-only">Save</button>
     <button id="e-close">Close</button>
   </div>
   <div class="ebody">
@@ -341,9 +349,11 @@ async function loadTemplates() {
       <div class="inputs"></div>
       <label class="f">For (leave as local for yourself; a name for someone in the house)</label>
       <input type="text" class="owner" value="local">
-      <div class="buttons"><button class="main install">Install</button></div>`;
+      <div class="buttons"><button class="main install">Install</button>
+        <button class="look" title="Every step as it would be installed, read only">Look inside</button></div>`;
     const form = inputsForm(t.inputs, {});
     el.querySelector(".inputs").appendChild(form);
+    el.querySelector(".look").onclick = () => openViewer(t.name).catch((e) => alert(e.message));
     el.querySelector(".install").onclick = () => act(() => api("POST", "/routines", {
       template: t.name, inputs: form.read(), owner: el.querySelector(".owner").value.trim() || "local",
       runner: el.querySelector(".owner").value.trim() && el.querySelector(".owner").value.trim() !== "local" ? "dvara" : "direct" }));
@@ -387,7 +397,22 @@ function refsOf(step) {
   return out;
 }
 
+// A template read before it is installed: the same canvas, nothing editable.
+let reading = null;
+async function openViewer(name) {
+  reading = await api("GET", `/templates/${encodeURIComponent(name)}`);
+  doc = JSON.parse(JSON.stringify(reading.routine));
+  owner = "local"; original = ""; selected = null;
+  $("editor").classList.add("reading");
+  $("editor").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  placeUnplaced();
+  draw(); side(); check(false);
+}
+
 function openEditor(r) {
+  reading = null;
+  $("editor").classList.remove("reading");
   owner = r ? r.owner : "local";
   original = r ? r.name : "";
   doc = r ? JSON.parse(JSON.stringify(r.steps ? fromCard(r) : r)) : {
@@ -396,6 +421,7 @@ function openEditor(r) {
   selected = null;
   $("editor").classList.remove("hidden");
   document.body.style.overflow = "hidden";
+  placeUnplaced();
   draw(); side(); check();
 }
 function fromCard(r) {
@@ -449,6 +475,31 @@ function svgEl(name, attrs, parent) {
   return el;
 }
 function pos(step) { return step.at && step.at.length === 2 ? step.at : [40, 40]; }
+// A routine written by hand has no places on the canvas: each step without
+// one is put in the column of when it runs, so none hides behind another.
+function placeUnplaced() {
+  if (doc.steps.every((s) => s.at && s.at.length === 2)) return;
+  const waits = (s) => {
+    const out = new Set([...refsOf(s), ...(s.after || [])]);
+    if (s.only_if) out.add(s.only_if.split(/\s+/).pop());
+    return out;
+  };
+  const wave = {}, done = new Set();
+  for (let n = 0; done.size < doc.steps.length && n < doc.steps.length + 1; n++) {
+    const ready = doc.steps.filter((s) => !done.has(s.id) && [...waits(s)].every((w) =>
+      done.has(w) || !doc.steps.some((x) => x.id === w)));
+    if (!ready.length) break;
+    ready.forEach((s) => { wave[s.id] = n; });
+    ready.forEach((s) => done.add(s.id));
+  }
+  const row = {};
+  for (const s of doc.steps) {
+    if (s.at && s.at.length === 2) continue;
+    const col = wave[s.id] ?? 0;
+    row[col] = (row[col] ?? -1) + 1;
+    s.at = [40 + col * 236, 40 + row[col] * 96];
+  }
+}
 
 function draw() {
   const svg = $("svg");
@@ -518,6 +569,7 @@ function svgPoint(ev) {
 }
 function startDrag(ev, step, fromPort) {
   ev.preventDefault();
+  if (reading) fromPort = false;      // reading only: a click opens the step, nothing links
   const svg = $("svg");
   const start = svgPoint(ev);
   const [ox, oy] = pos(step);
@@ -563,7 +615,8 @@ function field(label, value, attrs = "", area = false) {
 function side() {
   const box = $("side");
   const step = doc.steps.find((s) => s.id === selected);
-  if (!step) return sideRoutine(box);
+  if (!step) return reading ? sideBefore(box) : sideRoutine(box);
+  if (reading) return sideStepRead(box, step);
   const kind = kindOf(step);
   const gates = doc.steps.filter((s) => s.id !== step.id && ("check" in s || "person" in s));
   const gate = step.only_if || "";
@@ -701,6 +754,40 @@ function sideRoutine(box) {
   $("r-add-in").onclick = () => { doc.inputs = { ...(doc.inputs || {}), ["input" + (inputs.length + 1)]: { kind: "text" } }; side(); check(); };
 }
 
+// -- reading a template before it is installed ----------------------------------------------
+function sideStepRead(box, step) {
+  const kind = kindOf(step);
+  const rows = Object.entries(step).filter(([k]) => !["id", "title", "at"].includes(k))
+    .map(([k, v]) => `<label class="f">${esc(k === kind ? KINDS[kind] : k)}</label>
+      <pre class="mono" style="white-space:pre-wrap;word-break:break-word;margin:0;background:var(--sunk);padding:8px;border-radius:6px">${esc(typeof v === "string" ? v : JSON.stringify(v, null, 1))}</pre>`);
+  box.innerHTML = `<div class="row"><b>${esc(step.title || step.id)}</b><span class="grow"></span>
+    <button class="link" id="s-back">before you install</button></div>
+    <div class="muted">${esc(KINDS[kind])} · id <code>${esc(step.id)}</code></div>${rows.join("")}`;
+  $("s-back").onclick = () => { selected = null; draw(); side(); };
+}
+function sideBefore(box) {
+  const r = reading;
+  const from = r.source === "vidhi" ? "comes with Vidhi"
+    : r.source === "mine" ? "this computer's own template"
+    : `from a marketplace: ${r.signed}`;
+  const inputs = Object.entries(doc.inputs || {});
+  box.innerHTML = `<b>Before you install</b>
+    <p class="small">${esc(doc.title || doc.name)}: <code>${esc(doc.name)}</code>, version ${esc(doc.version || "1")}${doc.author ? ", by " + esc(doc.author) : ""}. ${esc(from[0].toUpperCase() + from.slice(1))}.</p>
+    ${doc.about ? `<p class="small">${esc(doc.about)}</p>` : ""}
+    ${r.look_closer.length
+      ? `<div class="closer"><b>Look closer at</b><ul>${r.look_closer.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`
+      : `<div class="closer calm">Nothing here asks for a closer look: no step runs your agent with its tools, every call's arguments are written in the routine, and every tool is a plain read or a connected account's.</div>`}
+    <label class="f">Web addresses it reaches</label>
+    <div class="small">${r.reaches.length ? r.reaches.map(esc).join(", ") : "none"}</div>
+    <label class="f">Your accounts it uses</label>
+    <div class="small">${r.accounts.length ? r.accounts.map(esc).join(", ") : "none"}</div>
+    <label class="f">Each run</label>
+    <div class="small">${r.steps} steps, ${esc(r.cost)}</div>
+    <label class="f">Blanks you fill when you install it</label>
+    <div class="small">${inputs.length ? inputs.map(([n, spec]) => `${esc(spec.label || n)}${"default" in spec ? ` (default ${esc(spec.default)})` : ""}`).join("<br>") : "none"}</div>
+    <p class="muted">Click a step to read everything in it; TOML shows the exact file that would be installed. Installing runs nothing: each run waits for you, a schedule or a watch, and follows your permissions. Install it from its card, after filling its blanks.</p>`;
+}
+
 // -- checking, saving -------------------------------------------------------------------
 function check(soon = true) {
   clearTimeout(checkTimer);
@@ -726,9 +813,16 @@ $("e-arrange").onclick = async () => {
   draw();
 };
 $("e-toml").onclick = () => {
-  if (!last) return;
   const box = $("side");
   selected = null;
+  if (reading) {
+    box.innerHTML = `<b>The exact file</b><span class="muted"> · what installing keeps, byte for byte</span>
+      <textarea readonly style="min-height:60vh">${esc(reading.toml)}</textarea>
+      <div class="buttons"><button id="t-back">Back</button></div>`;
+    $("t-back").onclick = () => side();
+    return;
+  }
+  if (!last) return;
   box.innerHTML = `<b>As TOML</b><span class="muted"> · paste a routine here to draw it</span>
     <textarea id="t-text" style="min-height:60vh">${esc(last.toml || "")}</textarea>
     <div class="buttons"><button id="t-use">Draw this</button><button id="t-back">Back</button></div>`;
@@ -737,7 +831,7 @@ $("e-toml").onclick = () => {
     const said = await api("POST", "/check", { toml: $("t-text").value });
     if (!said.ok) return alert(said.error);
     if (original && said.routine.name !== original) return alert(`This is ${original}; a new name is a new routine.`);
-    doc = said.routine; draw(); side(); check();
+    doc = said.routine; placeUnplaced(); draw(); side(); check();
   };
 };
 $("e-save").onclick = async () => {

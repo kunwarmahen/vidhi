@@ -28,6 +28,14 @@ side at the same time, and remembers where each run got to.
 * **Or install a ready one.** Vidhi comes with a morning brief, a
   *price, then a plan*, and a cold-night warning. Installing one is
   filling its blanks: your city, your price line, which mail account.
+* **Read it before you install it.** **Look inside** opens a ready
+  routine on the same canvas, exactly as its author drew it, with
+  nothing you can change. *Before you install* says where it came from
+  (and checks a marketplace signature again), every address it reaches,
+  the accounts it uses, and, in red capitals, anything worth a second
+  look: a step that runs your agent with its tools, a call built from an
+  earlier step's answer, a tool that isn't a plain read. **TOML** shows
+  the exact file that would be kept.
 * **A routine can stop and ask you.** An *ask me* step puts a yes/no
   question in your chat, with two buttons. The run waits, for a minute
   or a day, with nothing held open. When you press **Yes**, on your
@@ -244,6 +252,6 @@ src/vidhi/
   catalog/     morning-brief, price-then-plan, cold-night
 ```
 
-`uv run pytest` runs the tests (82); `uv run ruff check src tests` the
+`uv run pytest` runs the tests (85); `uv run ruff check src tests` the
 lint. No dependencies: the standard library, plus OpenSSH's `ssh-keygen`
 for signatures.

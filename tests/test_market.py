@@ -179,3 +179,22 @@ def test_one_address_may_not_flood_the_queue(shop):
         shop.publish(ROUTINE, "pat", address="1.2.3.4")
     assert shop.publish(ROUTINE, "pat", address="5.6.7.8")["status"]
 
+
+
+def test_a_fetched_template_read_before_install_says_its_signature(served, keys, state):
+    import json
+    import urllib.request
+
+    queued = market.publish(served, ROUTINE, "pat")
+    market.approve(served, queued["id"], keys["rita"][0], "rita")
+    market.trust(state, "rita", keys["rita"][1])
+    path, _ = market.get(served, "hello", state)
+
+    def look():
+        request = urllib.request.Request(served + "/api/templates/hello",
+                                         headers={"Authorization": "Bearer " + "t" * 24})
+        with urllib.request.urlopen(request) as response:
+            return json.loads(response.read())
+    assert look()["signed"] == "signed by rita"
+    path.write_text(ROUTINE.replace('notify = "hello"', 'notify = "changed"'))
+    assert look()["signed"].startswith("NOT INSTALLABLE")

