@@ -1,0 +1,60 @@
+name = "price-then-plan"
+title = "Price, then a plan"
+about = """
+Looks up a price on a page, and when it is under your line asks you
+whether to make a plan. On your yes, the model writes the plan (what to
+buy, when, anything to watch for) and sends it to you. On a no, or no
+answer by the time you set, nothing more happens."""
+version = "1"
+author = "vidhi"
+
+[inputs.url]
+kind = "text"
+label = "The page with the price"
+
+[inputs.thing]
+kind = "text"
+label = "What it is, in your words"
+
+[inputs.line]
+kind = "number"
+label = "Ask me when the price is under"
+
+[[steps]]
+id = "page"
+title = "Look up the price"
+call = "web_fetch"
+args = { url = "{{inputs.url}}" }
+pick = "number:\\$\\s?([\\d,]+(?:\\.\\d+)?)"
+at = [40, 120]
+
+[[steps]]
+id = "cheap"
+title = "Under the line?"
+check = "{{page}}"
+below = "{{inputs.line}}"
+at = [260, 120]
+
+[[steps]]
+id = "go"
+title = "Ask me"
+person = "{{inputs.thing}} is ${{page}} now, under your line. Shall I make a plan?"
+within = "6h"
+only_if = "cheap"
+at = [480, 60]
+
+[[steps]]
+id = "plan"
+title = "Write the plan"
+ask = """
+{{inputs.thing}} costs ${{page}} today (page: {{inputs.url}}). Write a
+short plan for buying it: whether to buy now or wait, anything to check
+first, and one line on why. At most six lines."""
+only_if = "go"
+at = [700, 60]
+
+[[steps]]
+id = "send"
+title = "Send the plan"
+notify = "{{plan}}"
+at = [920, 60]

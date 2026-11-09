@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vidhi</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+/* Vidhi's page. One accent (saffron, the rite: the one main button, a
+   question waiting) on the family's cool paper; each step kind has its
+   own quiet colour on the canvas. No fonts are fetched. Light and dark
+   are the same tokens swapped. */
+:root {
+  color-scheme: light;
+  --paper: #f5f4f0; --sheet: #fcfbf8; --sunk: #ebe8e1; --line: #d9d4ca;
+  --ink: #1f1d1a; --ink-2: #514c44; --ink-3: #777066;
+  --accent: #b5651d; --accent-ink: #ffffff; --accent-soft: rgba(181, 101, 29, .12);
+  --ok: #2c7a52; --needs: #8b3a6f; --bad: #b3261e; --quiet: #7b7a72;
+  --k-call: #2f6f8f; --k-ask: #6b4fa0; --k-read: #2c7a52; --k-check: #9a6a00;
+  --k-person: #8b3a6f; --k-wait: #6f6a62; --k-notify: #1f5fbf;
+  --focus: rgba(181, 101, 29, .45);
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --deva: "Noto Sans Devanagari", "Noto Serif Devanagari", "Mangal",
+          "Kohinoor Devanagari", system-ui, sans-serif;
+  --measure: 980px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #13120f; --sheet: #1a1915; --sunk: #23211c; --line: #34312a;
+    --ink: #ece8e1; --ink-2: #b8b1a5; --ink-3: #8f887c;
+    --accent: #e3954e; --accent-ink: #1a1007; --accent-soft: rgba(227, 149, 78, .16);
+    --ok: #5cc28c; --needs: #d48bbd; --bad: #f07b6f; --quiet: #8f8e85;
+    --k-call: #5fa8c9; --k-ask: #a98ee0; --k-read: #5cc28c; --k-check: #d9a93a;
+    --k-person: #d48bbd; --k-wait: #a49e94; --k-notify: #7aa7f0;
+    --focus: rgba(227, 149, 78, .5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #13120f; --sheet: #1a1915; --sunk: #23211c; --line: #34312a;
+  --ink: #ece8e1; --ink-2: #b8b1a5; --ink-3: #8f887c;
+  --accent: #e3954e; --accent-ink: #1a1007; --accent-soft: rgba(227, 149, 78, .16);
+  --ok: #5cc28c; --needs: #d48bbd; --bad: #f07b6f; --quiet: #8f8e85;
+  --k-call: #5fa8c9; --k-ask: #a98ee0; --k-read: #5cc28c; --k-check: #d9a93a;
+  --k-person: #d48bbd; --k-wait: #a49e94; --k-notify: #7aa7f0;
+  --focus: rgba(227, 149, 78, .5);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--sans); }
+.wrap { max-width: var(--measure); margin: 0 auto; padding: 28px 16px 64px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+code, .mono { font-family: var(--mono); font-size: 13px; }
+.hidden { display: none !important; }
+header { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margin-bottom: 22px; }
+.mark { font-family: var(--deva); font-size: 52px; line-height: .9; font-weight: 600; }
+.mark small { display: block; font: 14px/1.4 var(--sans); color: var(--ink-3); margin-top: 10px; }
+.state-line { margin-left: auto; text-align: right; color: var(--ink-2); font-size: 14px; }
+.state-line b { color: var(--ink); font-weight: 600; }
+h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3);
+     margin: 30px 0 10px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+h2 .grow { flex: 1; }
+.card { background: var(--sheet); border: 1px solid var(--line); border-radius: 10px;
+        padding: 14px 16px; margin-bottom: 10px; }
+.card.ask { border-color: var(--accent); background: var(--accent-soft); }
+.row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.title { font-weight: 600; }
+.muted { color: var(--ink-3); font-size: 13px; }
+.small { font-size: 13px; color: var(--ink-2); }
+.pill { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line);
+        color: var(--ink-2); white-space: nowrap; }
+.pill.done { color: var(--ok); border-color: var(--ok); }
+.pill.failed, .pill.stopped { color: var(--bad); border-color: var(--bad); }
+.pill.waiting, .pill.queued, .pill.running { color: var(--accent); border-color: var(--accent); }
+.pill.skipped, .pill.pending { color: var(--quiet); }
+button { border: 1px solid var(--line); background: var(--sheet); border-radius: 7px;
+         padding: 5px 12px; cursor: pointer; }
+button:hover { border-color: var(--ink-3); }
+button.main { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.link { border: none; background: none; padding: 0; color: var(--accent); cursor: pointer;
+              text-decoration: underline; text-underline-offset: 2px; }
+button.danger { color: var(--bad); }
+.buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+ul.touches { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
+details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; margin-top: 8px; }
+details.card > summary { margin-top: 0; font-size: 15px; color: var(--ink); }
+summary .row { display: inline-flex; vertical-align: baseline; }
+.steps { margin-top: 8px; border-left: 2px solid var(--line); padding-left: 12px; }
+.step { margin: 6px 0; font-size: 14px; }
+.step pre { white-space: pre-wrap; word-break: break-word; background: var(--sunk); padding: 8px;
+            border-radius: 6px; margin: 4px 0 0; font: 12px/1.45 var(--mono); max-height: 220px;
+            overflow: auto; }
+label.f { display: block; font-size: 13px; color: var(--ink-2); margin: 8px 0 3px; }
+input[type=text], input[type=number], select, textarea {
+  width: 100%; background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; }
+textarea { font: 13px/1.45 var(--mono); min-height: 70px; resize: vertical; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.note { padding: 10px 14px; border-radius: 8px; background: var(--sunk); color: var(--ink-2);
+        font-size: 14px; }
+.err { color: var(--bad); }
+.okc { color: var(--ok); }
+
+/* -- the canvas -- */
+#editor { position: fixed; inset: 0; background: var(--paper); z-index: 10; display: flex;
+          flex-direction: column; }
+.ebar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 14px;
+        border-bottom: 1px solid var(--line); background: var(--sheet); }
+.ebar .name { font-weight: 600; margin-right: 6px; }
+.ebar .grow { flex: 1; }
+.add button { font-size: 13px; padding: 3px 9px; }
+.ebody { flex: 1; display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+.board { position: relative; overflow: auto; background:
+         radial-gradient(var(--line) 1px, transparent 1px) 0 0 / 22px 22px; }
+.board svg { display: block; touch-action: none; }
+.side { border-left: 1px solid var(--line); overflow: auto; padding: 12px 14px; background: var(--sheet); }
+.verdict { padding: 8px 14px; border-top: 1px solid var(--line); background: var(--sheet);
+           font-size: 13px; max-height: 26vh; overflow: auto; }
+.node rect.box { fill: var(--sheet); stroke: var(--line); stroke-width: 1.5; }
+.node.sel rect.box { stroke: var(--accent); stroke-width: 2.5; }
+.node rect.band { stroke: none; }
+.node text { font: 13px var(--sans); fill: var(--ink); pointer-events: none; }
+.node text.k { font-size: 11px; fill: var(--ink-3); letter-spacing: .04em; }
+.node circle.port { fill: var(--sheet); stroke: var(--ink-3); stroke-width: 1.5; cursor: crosshair; }
+.node circle.port:hover { stroke: var(--accent); fill: var(--accent-soft); }
+.node { cursor: grab; }
+path.edge { fill: none; stroke: var(--ink-3); stroke-width: 1.6; }
+path.edge.after { stroke-dasharray: 2 4; }
+path.edge.gate { stroke: var(--accent); stroke-dasharray: 7 5; }
+path.edge.hit { stroke: transparent; stroke-width: 12; cursor: pointer; }
+text.elabel { font: 11px var(--sans); fill: var(--accent); }
+path.drag { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; }
+@media (max-width: 760px) {
+  .ebody { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+  .side { border-left: none; border-top: 1px solid var(--line); }
+  .state-line { text-align: left; margin-left: 0; }
+  .grid2 { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="mark">विधि<small>Vidhi: routines you draw once, which a schedule, a watch,
+      a button or a chat can start</small></div>
+    <div class="state-line" id="state-line">…</div>
+  </header>
+  <p class="note hidden" id="no-token">This page needs the link <code>vidhi serve</code>
+    printed when it started (the part after <code>#token=</code>). Open that link once and
+    this browser remembers it.</p>
+
+  <section id="asks-box" class="hidden">
+    <h2>Waiting for you</h2>
+    <div id="asks"></div>
+  </section>
+
+  <h2>Routines <span class="grow"></span><button id="new-routine">New routine</button></h2>
+  <div id="routines"><p class="muted">…</p></div>
+
+  <h2>Runs</h2>
+  <div id="runs"><p class="muted">…</p></div>
+
+  <h2>Ready to install</h2>
+  <div id="templates"><p class="muted">…</p></div>
+</div>
+
+<div id="editor" class="hidden" role="dialog" aria-label="Draw a routine">
+  <div class="ebar">
+    <span class="name" id="e-name">…</span>
+    <span class="add" id="e-add"></span>
+    <span class="grow"></span>
+    <button id="e-arrange" title="Lay the steps out by when they run">Arrange</button>
+    <button id="e-toml">TOML</button>
+    <button id="e-template" title="Keep a copy as one of this computer's templates">Save as template</button>
+    <button id="e-save" class="main">Save</button>
+    <button id="e-close">Close</button>
+  </div>
+  <div class="ebody">
+    <div class="board" id="board"><svg id="svg" width="1400" height="900"></svg></div>
+    <div class="side" id="side"></div>
+  </div>
+  <div class="verdict" id="verdict">…</div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let token = "";
+const fromHash = new URLSearchParams(location.hash.slice(1)).get("token");
+if (fromHash) {
+  token = fromHash;
+  try { localStorage.setItem("vidhi-token", token); } catch (_) {}
+  history.replaceState(null, "", location.pathname);
+} else {
+  try { token = localStorage.getItem("vidhi-token") || ""; } catch (_) {}
+}
+async function api(method, path, body) {
+  const res = await fetch("/api" + path, {
+    method, headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  if (res.status === 401) { $("no-token").classList.remove("hidden"); throw new Error("no token"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+}
+function when(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit",
+                                       month: "short", day: "numeric" });
+}
+const KINDS = { call: "Call a tool", ask: "Ask the model", read: "Read a reading",
+                check: "Check a value", person: "Ask me", wait: "Wait", notify: "Tell me" };
+const SHORT = { call: "call", ask: "ask", read: "read", check: "check", person: "ask me",
+                wait: "wait", notify: "tell me" };
+
+// -- lists -----------------------------------------------------------------------------
+const opened = new Set();
+function keepOpen(el, key) {
+  if (opened.has(key)) el.open = true;
+  el.addEventListener("toggle", () => el.open ? opened.add(key) : opened.delete(key));
+}
+
+async function loadStatus() {
+  const s = await api("GET", "/status");
+  const n = Object.values(s.routines || {}).reduce((a, b) => a + b, 0);
+  $("state-line").innerHTML = `<b>${n}</b> routine${n === 1 ? "" : "s"} · running
+    <b>${s.runs.running}</b> · waiting <b>${s.runs.waiting}</b>` +
+    (s.dvara ? "<br>tells you through Dvara" : "<br>no Dvara: messages stay on the run");
+}
+
+async function loadAsks() {
+  const asks = await api("GET", "/questions");
+  $("asks-box").classList.toggle("hidden", !asks.length);
+  $("asks").innerHTML = "";
+  for (const q of asks) {
+    const card = document.createElement("div");
+    card.className = "card ask";
+    card.innerHTML = `<div class="title">${esc(q.text)}</div>
+      <div class="muted">${esc(q.owner)} · no answer by ${esc(when(q.until))} is no · ${esc(q.code)}</div>
+      <div class="buttons"><button class="main" data-a="yes">Yes</button><button data-a="no">No</button></div>`;
+    card.querySelectorAll("button").forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      try { await api("POST", `/questions/${q.code}`, { answer: b.dataset.a }); }
+      catch (e) { alert(e.message); }
+      refresh();
+    });
+    $("asks").appendChild(card);
+  }
+}
+
+function inputsForm(specs, values) {
+  const box = document.createElement("div");
+  box.className = "grid2";
+  for (const spec of specs || []) {
+    const v = values && spec.name in values ? values[spec.name] : (spec.default ?? "");
+    const wrap = document.createElement("div");
+    wrap.innerHTML = `<label class="f">${esc(spec.label || spec.name)}</label>
+      <input type="${spec.kind === "number" ? "number" : "text"}" step="any" data-name="${esc(spec.name)}" value="${esc(v)}">`;
+    box.appendChild(wrap);
+  }
+  box.read = () => Object.fromEntries([...box.querySelectorAll("input")]
+    .filter((i) => i.value !== "").map((i) => [i.dataset.name, i.value]));
+  return box;
+}
+
+async function loadRoutines() {
+  const list = await api("GET", "/routines");
+  const box = $("routines");
+  box.innerHTML = list.length ? "" : `<p class="muted">None yet. Install one below, or draw one with <b>New routine</b>.</p>`;
+  for (const r of list) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="row"><span class="title">${esc(r.title)}</span>
+        <code>${esc(r.name)}</code><span class="pill ${r.state === "active" ? "" : "waiting"}">${esc(r.state)}</span>
+        <span class="muted">${esc(r.owner)} · ${esc(r.cost)}${r.signed_by ? " · signed by " + esc(r.signed_by) : ""}</span></div>
+      ${r.broken ? `<p class="err">${esc(r.broken)}</p>` : ""}
+      ${r.about ? `<p class="small">${esc(r.about)}</p>` : ""}
+      <details class="t"><summary>What it touches</summary><ul class="touches">${(r.touches || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ul></details>
+      <details class="i"><summary>Inputs</summary><div class="inputs"></div>
+        <div class="buttons"><button class="save-in">Keep these</button></div></details>
+      <div class="buttons"><button class="main run">Run now</button><button class="edit">Draw</button>
+        <button class="toggle">${r.state === "active" ? "Pause" : "Resume"}</button>
+        <button class="danger rm">Remove</button></div>`;
+    keepOpen(card.querySelector("details.t"), "t:" + r.owner + r.name);
+    keepOpen(card.querySelector("details.i"), "i:" + r.owner + r.name);
+    const form = inputsForm(r.inputs_spec, r.inputs);
+    card.querySelector(".inputs").appendChild(form);
+    const path = `/routines/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.name)}`;
+    card.querySelector(".save-in").onclick = () => act(() => api("POST", path + "/inputs", { inputs: form.read() }));
+    card.querySelector(".run").onclick = () => act(() => api("POST", path + "/run", { inputs: form.read() }));
+    card.querySelector(".edit").onclick = () => openEditor(r);
+    card.querySelector(".toggle").onclick = () => act(() => api("POST", path + (r.state === "active" ? "/pause" : "/resume")));
+    card.querySelector(".rm").onclick = () => confirm(`Remove ${r.name}? Its runs stay listed.`) && act(() => api("DELETE", path));
+    box.appendChild(card);
+  }
+}
+
+async function loadRuns() {
+  const runs = await api("GET", "/runs?limit=20");
+  const box = $("runs");
+  box.innerHTML = runs.length ? "" : `<p class="muted">No runs yet.</p>`;
+  for (const run of runs) {
+    const done = run.steps.filter((s) => s.state === "done").length;
+    const el = document.createElement("details");
+    el.className = "card";
+    keepOpen(el, "r:" + run.id);
+    el.innerHTML = `<summary><span class="row"><span class="title">${esc(run.routine)}</span>
+      <span class="pill ${esc(run.state)}">${esc(run.state)}</span>
+      <span class="muted">${esc(when(run.created_at))} · ${done}/${run.steps.length} steps · by ${esc(run.started_by)} · ${esc(run.owner)}</span></span></summary>
+      ${run.detail ? `<p class="small">${esc(run.detail)}</p>` : ""}
+      <div class="steps">${run.steps.map((s) => `<div class="step"><span class="pill ${esc(s.state)}">${esc(s.state)}</span>
+        <b>${esc(s.title)}</b> <span class="muted">${esc(SHORT[s.kind] || s.kind)}</span>
+        ${s.why || s.detail ? `<div class="small">${esc(s.why || "")}${s.why && s.detail ? " · " : ""}${esc(s.detail || "")}</div>` : ""}
+        ${s.result ? `<pre>${esc(s.result)}</pre>` : ""}</div>`).join("")}</div>
+      ${["queued", "running", "waiting"].includes(run.state) ? `<div class="buttons"><button class="danger stop">Stop this run</button></div>` : ""}`;
+    const stop = el.querySelector(".stop");
+    if (stop) stop.onclick = () => act(() => api("POST", `/runs/${run.id}/stop`));
+    box.appendChild(el);
+  }
+}
+
+async function loadTemplates() {
+  const { templates, broken } = await api("GET", "/templates");
+  const box = $("templates");
+  box.innerHTML = "";
+  for (const t of templates) {
+    const el = document.createElement("details");
+    el.className = "card";
+    keepOpen(el, "tp:" + t.name);
+    el.innerHTML = `<summary><span class="row"><span class="title">${esc(t.title)}</span><code>${esc(t.name)}</code>
+      <span class="muted">${esc(t.cost)} · ${esc(t.source === "vidhi" ? "comes with Vidhi" : t.source === "mine" ? "this computer's" : "from a marketplace, signed by " + t.signed_by)}</span></span></summary>
+      ${t.about ? `<p class="small">${esc(t.about)}</p>` : ""}
+      <ul class="touches">${t.touches.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      <div class="inputs"></div>
+      <label class="f">For (leave as local for yourself; a name for someone in the house)</label>
+      <input type="text" class="owner" value="local">
+      <div class="buttons"><button class="main install">Install</button></div>`;
+    const form = inputsForm(t.inputs, {});
+    el.querySelector(".inputs").appendChild(form);
+    el.querySelector(".install").onclick = () => act(() => api("POST", "/routines", {
+      template: t.name, inputs: form.read(), owner: el.querySelector(".owner").value.trim() || "local",
+      runner: el.querySelector(".owner").value.trim() && el.querySelector(".owner").value.trim() !== "local" ? "dvara" : "direct" }));
+    box.appendChild(el);
+  }
+  for (const b of broken) box.insertAdjacentHTML("beforeend", `<p class="err small">${esc(b)}</p>`);
+}
+
+async function act(fn) {
+  try { await fn(); } catch (e) { alert(e.message); }
+  refresh(true);
+}
+
+async function refresh(all) {
+  try {
+    await Promise.all([loadStatus(), loadAsks(), loadRuns(),
+                       ...(all ? [loadRoutines(), loadTemplates()] : [])]);
+  } catch (e) { if (e.message !== "no token") console.error(e); }
+}
+refresh(true);
+setInterval(() => { if ($("editor").classList.contains("hidden")) refresh(false); }, 5000);
+
+// -- the canvas ------------------------------------------------------------------------
+const W = 176, H = 60, SVGNS = "http://www.w3.org/2000/svg";
+let doc = null;          // the routine being drawn, in TOML's own keys
+let owner = "local", original = "";
+let selected = null, last = null, checkTimer = null;
+
+function kindOf(step) { return Object.keys(KINDS).find((k) => k in step); }
+function refsOf(step) {
+  const out = new Set();
+  const walk = (v) => {
+    if (typeof v === "string") {
+      for (const m of v.matchAll(/\{\{\s*([a-z][a-z0-9_-]*)/g))
+        if (m[1] !== "inputs" && m[1] !== "run") out.add(m[1]);
+    } else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  for (const [k, v] of Object.entries(step))
+    if (!["id", "title", "after", "only_if", "at", "optional"].includes(k)) walk(v);
+  return out;
+}
+
+function openEditor(r) {
+  owner = r ? r.owner : "local";
+  original = r ? r.name : "";
+  doc = r ? JSON.parse(JSON.stringify(r.steps ? fromCard(r) : r)) : {
+    name: "my-routine", title: "My routine", version: "1",
+    steps: [{ id: "hello", title: "Say hello", notify: "Hello from Vidhi, {{run.date}}", at: [60, 80] }] };
+  selected = null;
+  $("editor").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  draw(); side(); check();
+}
+function fromCard(r) {
+  // the card carries the routine's own keys; strip what the page added
+  const out = { name: r.name, title: r.title, version: r.version || "1" };
+  if (r.about) out.about = r.about;
+  if (r.author) out.author = r.author;
+  if (r.inputs_spec && r.inputs_spec.length)
+    out.inputs = Object.fromEntries(r.inputs_spec.map((i) => {
+      const { name, ...rest } = i; return [name, rest]; }));
+  out.steps = r.steps.map((s) => { const { kind, ...rest } = s; return rest; });
+  return out;
+}
+
+$("new-routine").onclick = () => openEditor(null);
+$("e-close").onclick = () => { $("editor").classList.add("hidden"); document.body.style.overflow = ""; refresh(true); };
+$("e-add").innerHTML = Object.entries(KINDS).map(([k, label]) =>
+  `<button data-k="${k}" title="Add a step: ${esc(label)}">+ ${esc(SHORT[k])}</button>`).join(" ");
+$("e-add").querySelectorAll("button").forEach((b) => b.onclick = () => addStep(b.dataset.k));
+
+function newId(kind) {
+  const base = { call: "fetch", ask: "write", read: "reading", check: "test", person: "ok",
+                 wait: "pause", notify: "tell" }[kind];
+  let n = 1, id = base;
+  while (doc.steps.some((s) => s.id === id)) id = base + (++n);
+  return id;
+}
+function addStep(kind) {
+  const id = newId(kind);
+  const fresh = { id, title: KINDS[kind] };
+  const defaults = { call: ["web_fetch", { args: { url: "https://" } }],
+    ask: ["Write a short note from {{" + (doc.steps[doc.steps.length - 1]?.id || "x") + "}}", {}],
+    read: ["outside-temp", {}], check: ["{{" + (doc.steps[doc.steps.length - 1]?.id || "x") + "}}", { below: 40 }],
+    person: ["Shall I go on?", { within: "2h" }], wait: ["30m", {}], notify: ["Done.", {}] }[kind];
+  fresh[kind] = defaults[0];
+  Object.assign(fresh, defaults[1]);
+  const xs = doc.steps.map((s) => (s.at || [0, 0])[0]);
+  fresh.at = [Math.max(60, ...xs.map((x) => x + 230)), 80];
+  if (kind === "ask" || kind === "check") {
+    if (!doc.steps.length) fresh[kind] = kind === "ask" ? "Write a short note." : "{{inputs.x}}";
+  }
+  doc.steps.push(fresh);
+  selected = id;
+  draw(); side(); check();
+}
+
+function svgEl(name, attrs, parent) {
+  const el = document.createElementNS(SVGNS, name);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+function pos(step) { return step.at && step.at.length === 2 ? step.at : [40, 40]; }
+
+function draw() {
+  const svg = $("svg");
+  svg.innerHTML = "";
+  const byId = Object.fromEntries(doc.steps.map((s) => [s.id, s]));
+  let maxX = 900, maxY = 600;
+  const edges = svgEl("g", {}, svg);
+  for (const step of doc.steps) {
+    const [x2, y2] = pos(step);
+    const lines = [];
+    for (const r of refsOf(step)) lines.push([r, "use"]);
+    for (const a of step.after || []) if (!refsOf(step).has(a)) lines.push([a, "after"]);
+    if (step.only_if) {
+      const words = step.only_if.split(/\s+/);
+      lines.push([words[words.length - 1], words[0] === "not" ? "if no" : "if yes"]);
+    }
+    for (const [from, how] of lines) {
+      const src = byId[from];
+      if (!src) continue;
+      const [x1, y1] = pos(src);
+      const a = [x1 + W, y1 + H / 2], b = [x2, y2 + H / 2];
+      const dx = Math.max(40, (b[0] - a[0]) / 2);
+      const d = `M${a[0]},${a[1]} C${a[0] + dx},${a[1]} ${b[0] - dx},${b[1]} ${b[0]},${b[1]}`;
+      const cls = how === "use" ? "edge" : how === "after" ? "edge after" : "edge gate";
+      svgEl("path", { d, class: cls, "marker-end": "url(#arrow)" }, edges);
+      if (how.startsWith("if")) {
+        const t = svgEl("text", { x: (a[0] + b[0]) / 2 - 14, y: (a[1] + b[1]) / 2 - 6, class: "elabel" }, edges);
+        t.textContent = how;
+      }
+      if (how === "after") {
+        const hit = svgEl("path", { d, class: "edge hit" }, edges);
+        hit.appendChild(svgEl("title", {})).textContent = `${step.id} waits for ${from}: click to take that away`;
+        hit.onclick = () => { step.after = (step.after || []).filter((x) => x !== from);
+                              if (!step.after.length) delete step.after; draw(); check(); };
+      }
+    }
+  }
+  const defs = svgEl("defs", {}, svg);
+  const marker = svgEl("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5,
+                                   markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
+  svgEl("path", { d: "M0,0 L10,5 L0,10 z", fill: "currentColor", style: "color: var(--ink-3)" }, marker);
+  for (const step of doc.steps) {
+    const kind = kindOf(step);
+    const [x, y] = pos(step);
+    maxX = Math.max(maxX, x + W + 80); maxY = Math.max(maxY, y + H + 80);
+    const g = svgEl("g", { class: "node" + (selected === step.id ? " sel" : ""),
+                          transform: `translate(${x},${y})`, tabindex: 0 }, svg);
+    svgEl("rect", { class: "box", width: W, height: H, rx: 9 }, g);
+    svgEl("rect", { class: "band", width: 6, height: H, rx: 3, style: `fill: var(--k-${kind})` }, g);
+    const k = svgEl("text", { x: 16, y: 20, class: "k" }, g);
+    k.textContent = (SHORT[kind] || "?").toUpperCase() + (step.optional ? " · optional" : "");
+    const t = svgEl("text", { x: 16, y: 40 }, g);
+    const label = step.title || step.id;
+    t.textContent = label.length > 21 ? label.slice(0, 20) + "…" : label;
+    svgEl("title", {}, g).textContent = `${step.id}: ${label}`;
+    const port = svgEl("circle", { class: "port", cx: W, cy: H / 2, r: 7 }, g);
+    port.appendChild(svgEl("title", {})).textContent = "Drag to a step that should wait for this one";
+    g.addEventListener("pointerdown", (ev) => startDrag(ev, step, ev.target === port));
+    g.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { selected = step.id; draw(); side(); } });
+  }
+  svg.setAttribute("width", maxX); svg.setAttribute("height", maxY);
+}
+
+function svgPoint(ev) {
+  const r = $("svg").getBoundingClientRect();
+  return [ev.clientX - r.left, ev.clientY - r.top];
+}
+function startDrag(ev, step, fromPort) {
+  ev.preventDefault();
+  const svg = $("svg");
+  const start = svgPoint(ev);
+  const [ox, oy] = pos(step);
+  let moved = false, line = null;
+  if (fromPort) line = svgEl("path", { class: "drag" }, svg);
+  const move = (e) => {
+    const [px, py] = svgPoint(e);
+    if (Math.abs(px - start[0]) + Math.abs(py - start[1]) > 3) moved = true;
+    if (fromPort) {
+      line.setAttribute("d", `M${ox + W},${oy + H / 2} L${px},${py}`);
+    } else if (moved) {
+      step.at = [Math.max(0, Math.round(ox + px - start[0])), Math.max(0, Math.round(oy + py - start[1]))];
+      draw();
+    }
+  };
+  const up = (e) => {
+    svg.removeEventListener("pointermove", move);
+    svg.removeEventListener("pointerup", up);
+    if (fromPort) {
+      line.remove();
+      const [px, py] = svgPoint(e);
+      const target = doc.steps.find((s) => { const [x, y] = pos(s);
+        return px >= x && px <= x + W && py >= y && py <= y + H; });
+      if (target && target.id !== step.id && !refsOf(target).has(step.id)) {
+        target.after = [...new Set([...(target.after || []), step.id])];
+      }
+      draw(); check();
+      return;
+    }
+    if (!moved) { selected = step.id; draw(); side(); }
+    else check(false);
+  };
+  svg.addEventListener("pointermove", move);
+  svg.addEventListener("pointerup", up);
+}
+
+// -- the side: one step, or the routine itself ------------------------------------------
+function field(label, value, attrs = "", area = false) {
+  return `<label class="f">${esc(label)}</label>` + (area
+    ? `<textarea ${attrs}>${esc(value)}</textarea>`
+    : `<input type="text" ${attrs} value="${esc(value)}">`);
+}
+function side() {
+  const box = $("side");
+  const step = doc.steps.find((s) => s.id === selected);
+  if (!step) return sideRoutine(box);
+  const kind = kindOf(step);
+  const gates = doc.steps.filter((s) => s.id !== step.id && ("check" in s || "person" in s));
+  const gate = step.only_if || "";
+  let html = `<div class="row"><b>${esc(KINDS[kind])}</b><span class="grow"></span>
+    <button class="link" id="s-back">the routine</button></div>
+    ${field("Id (other steps use its result as {{" + step.id + "}})", step.id, 'data-k="id"')}
+    ${field("Title", step.title || "", 'data-k="title"')}`;
+  if (kind === "call") {
+    html += field("Tool (its exact name)", step.call, 'data-k="call"') +
+      field("Arguments (JSON)", JSON.stringify(step.args || {}, null, 1), 'data-k="args" data-json="1"', true) +
+      field("Pick (json:a.b, number, number:PATTERN, text:PATTERN; empty: all)", step.pick || "", 'data-k="pick"');
+  } else if (kind === "ask") {
+    html += field("What to ask (use {{step}} for an earlier result)", step.ask, 'data-k="ask"', true) +
+      `<label class="f"><input type="checkbox" data-k="tools" ${step.tools ? "checked" : ""}> as my agent, with its tools (asks as my rules say)</label>`;
+  } else if (kind === "read") {
+    html += field("Reading's name (an indriya)", step.read, 'data-k="read"') +
+      field("Read again if older than (5m, 1h; empty: as kept)", step.max_age || "", 'data-k="max_age"');
+  } else if (kind === "check") {
+    const tests = ["below", "above", "at_most", "at_least", "equals", "contains", "lacks", "matches"];
+    const test = tests.find((t) => t in step) || "below";
+    html += field("Value to check", step.check, 'data-k="check"') +
+      `<label class="f">Is it</label><select id="s-test">${tests.map((t) =>
+        `<option ${t === test ? "selected" : ""}>${t}</option>`).join("")}</select>` +
+      field("Than / for", step[test] ?? "", 'id="s-against"');
+  } else if (kind === "person") {
+    html += field("The question (yes or no)", step.person, 'data-k="person"', true) +
+      field("Wait for an answer up to (no answer is no)", step.within || "24h", 'data-k="within"');
+  } else if (kind === "wait") {
+    html += field("Wait for (30m, 2h)", step.wait || "", 'data-k="wait"') +
+      field("…or until a time of day (07:30)", step.until || "", 'data-k="until"');
+  } else if (kind === "notify") {
+    html += field("What to tell me", step.notify, 'data-k="notify"', true);
+  }
+  html += `<label class="f">Only if</label><select id="s-gate"><option value="">always</option>
+    ${gates.map((g) => [g.id, "not " + g.id]).flat().map((v) =>
+      `<option value="${esc(v)}" ${v === gate ? "selected" : ""}>${esc(v.startsWith("not ") ? v.slice(4) + " said no" : v + " said yes")}</option>`).join("")}</select>
+    ${field("Also waits for (ids, commas)", (step.after || []).join(", "), 'data-k="after"')}
+    <label class="f"><input type="checkbox" data-k="optional" ${step.optional ? "checked" : ""}> optional: if it fails, go on without it</label>
+    <div class="buttons"><button class="danger" id="s-del">Delete this step</button></div>`;
+  box.innerHTML = html;
+  $("s-back").onclick = () => { selected = null; draw(); side(); };
+  box.querySelectorAll("[data-k]").forEach((el) => el.addEventListener("input", () => {
+    const k = el.dataset.k;
+    if (el.type === "checkbox") { if (el.checked) step[k] = true; else delete step[k]; }
+    else if (k === "id") {
+      const old = step.id, now = el.value.trim();
+      if (!now || doc.steps.some((s) => s !== step && s.id === now)) return;
+      renameRefs(old, now); step.id = now; selected = now;
+    } else if (k === "after") {
+      const ids = el.value.split(",").map((x) => x.trim()).filter(Boolean);
+      if (ids.length) step.after = ids; else delete step.after;
+    } else if (el.dataset.json) {
+      try { step[k] = JSON.parse(el.value || "{}"); el.classList.remove("err"); }
+      catch (_) { el.classList.add("err"); return; }
+    } else if (el.value === "" && !["call", "ask", "read", "check", "person", "notify", "wait"].includes(k)) {
+      delete step[k];
+    } else step[k] = el.value;
+    draw(); check();
+  }));
+  const test = $("s-test"), against = $("s-against");
+  if (test) {
+    const put = () => {
+      ["below", "above", "at_most", "at_least", "equals", "contains", "lacks", "matches"].forEach((t) => delete step[t]);
+      const raw = against.value;
+      const num = ["below", "above", "at_most", "at_least"].includes(test.value) && raw.trim() !== "" && !isNaN(Number(raw));
+      step[test.value] = num ? Number(raw) : raw;
+      check();
+    };
+    test.onchange = put; against.oninput = put;
+  }
+  $("s-gate").onchange = (e) => { if (e.target.value) step.only_if = e.target.value; else delete step.only_if; draw(); check(); };
+  $("s-del").onclick = () => {
+    doc.steps = doc.steps.filter((s) => s !== step);
+    for (const s of doc.steps) {
+      if (s.after) { s.after = s.after.filter((a) => a !== step.id); if (!s.after.length) delete s.after; }
+      if (s.only_if && s.only_if.split(/\s+/).pop() === step.id) delete s.only_if;
+    }
+    selected = null; draw(); side(); check();
+  };
+}
+function renameRefs(old, now) {
+  const re = new RegExp("\\{\\{\\s*" + old.replace(/[-]/g, "\\-") + "(?=[\\s.}])", "g");
+  const fix = (v) => typeof v === "string" ? v.replace(re, "{{" + now)
+    : Array.isArray(v) ? v.map(fix) : v && typeof v === "object"
+      ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)])) : v;
+  for (const s of doc.steps) {
+    for (const k of Object.keys(s)) if (!["id", "at"].includes(k)) s[k] = fix(s[k]);
+    if (s.after) s.after = s.after.map((a) => a === old ? now : a);
+    if (s.only_if) s.only_if = s.only_if.replace(new RegExp("\\b" + old + "$"), now);
+  }
+}
+function sideRoutine(box) {
+  const inputs = Object.entries(doc.inputs || {});
+  box.innerHTML = `<b>The routine</b>
+    ${field("Name (one word; can't change once saved)", doc.name, 'data-r="name"' + (original ? " disabled" : ""))}
+    ${field("Title", doc.title || "", 'data-r="title"')}
+    ${field("What it does, in words", doc.about || "", 'data-r="about"', true)}
+    <label class="f">Inputs: blanks filled when it's installed (use as {{inputs.NAME}})</label>
+    <div id="r-inputs">${inputs.map(([n, spec], i) => `<div class="grid2" data-i="${i}">
+      <input type="text" data-p="name" value="${esc(n)}" aria-label="name">
+      <select data-p="kind">${["text", "number", "time", "yesno", "account", "channel", "indriya"].map((k) =>
+        `<option ${k === (spec.kind || "text") ? "selected" : ""}>${k}</option>`).join("")}</select>
+      <input type="text" data-p="label" value="${esc(spec.label || "")}" placeholder="what to ask" aria-label="label">
+      <input type="text" data-p="default" value="${esc(spec.default ?? "")}" placeholder="default" aria-label="default">
+    </div><hr style="border:none;border-top:1px dashed var(--line)">`).join("")}</div>
+    <div class="buttons"><button id="r-add-in">+ input</button></div>
+    ${field("Accounts it needs (Setu names, commas)", ((doc.needs || {}).setu || []).join(", "), 'data-r="setu"')}
+    <p class="muted">Click a step to change it. Drag a step's right dot onto another step to make that one wait for it. Steps that don't wait on each other run side by side.</p>`;
+  box.querySelectorAll("[data-r]").forEach((el) => el.addEventListener("input", () => {
+    const k = el.dataset.r;
+    if (k === "setu") {
+      const names = el.value.split(",").map((x) => x.trim()).filter(Boolean);
+      doc.needs = doc.needs || {};
+      if (names.length) doc.needs.setu = names; else delete doc.needs.setu;
+      if (!Object.keys(doc.needs).length) delete doc.needs;
+    } else if (el.value === "" && k !== "name") delete doc[k];
+    else doc[k] = el.value;
+    $("e-name").textContent = doc.title || doc.name;
+    check();
+  }));
+  const readInputs = () => {
+    const out = {};
+    box.querySelectorAll("#r-inputs [data-i]").forEach((row) => {
+      const get = (p) => row.querySelector(`[data-p="${p}"]`).value.trim();
+      if (!get("name")) return;
+      const spec = { kind: get("kind") };
+      if (get("label")) spec.label = get("label");
+      if (get("default") !== "") spec.default = spec.kind === "number" && !isNaN(Number(get("default"))) ? Number(get("default")) : get("default");
+      out[get("name")] = spec;
+    });
+    if (Object.keys(out).length) doc.inputs = out; else delete doc.inputs;
+    check();
+  };
+  box.querySelectorAll("#r-inputs input, #r-inputs select").forEach((el) => el.addEventListener("input", readInputs));
+  $("r-add-in").onclick = () => { doc.inputs = { ...(doc.inputs || {}), ["input" + (inputs.length + 1)]: { kind: "text" } }; side(); check(); };
+}
+
+// -- checking, saving -------------------------------------------------------------------
+function check(soon = true) {
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(async () => {
+    try { last = await api("POST", "/check", { routine: doc }); }
+    catch (e) { last = { ok: false, error: e.message }; }
+    $("e-name").textContent = doc.title || doc.name;
+    $("verdict").innerHTML = last.ok
+      ? `<span class="okc">Reads.</span> ${esc(last.cost)} · runs as: ${last.waves.map((w, i) =>
+          `<b>${i + 1}.</b> ${w.map(esc).join(" + ")}`).join(" → ")}
+         <ul class="touches">${last.touches.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>`
+      : `<span class="err">Not yet: ${esc(last.error)}</span>`;
+  }, soon ? 250 : 0);
+}
+$("e-arrange").onclick = async () => {
+  check(false);
+  await new Promise((r) => setTimeout(r, 400));
+  if (!last || !last.ok) return;
+  last.waves.forEach((wave, i) => wave.forEach((id, j) => {
+    const s = doc.steps.find((x) => x.id === id);
+    if (s) s.at = [40 + i * 236, 40 + j * 96];
+  }));
+  draw();
+};
+$("e-toml").onclick = () => {
+  if (!last) return;
+  const box = $("side");
+  selected = null;
+  box.innerHTML = `<b>As TOML</b><span class="muted"> · paste a routine here to draw it</span>
+    <textarea id="t-text" style="min-height:60vh">${esc(last.toml || "")}</textarea>
+    <div class="buttons"><button id="t-use">Draw this</button><button id="t-back">Back</button></div>`;
+  $("t-back").onclick = () => side();
+  $("t-use").onclick = async () => {
+    const said = await api("POST", "/check", { toml: $("t-text").value });
+    if (!said.ok) return alert(said.error);
+    if (original && said.routine.name !== original) return alert(`This is ${original}; a new name is a new routine.`);
+    doc = said.routine; draw(); side(); check();
+  };
+};
+$("e-save").onclick = async () => {
+  try {
+    if (original) {
+      const said = await api("PUT", `/routines/${encodeURIComponent(owner)}/${encodeURIComponent(original)}`, { routine: doc });
+      alert("Saved." + (said.said && said.said.length ? "\n" + said.said.join("\n") : ""));
+    } else {
+      await api("POST", "/routines", { routine: doc, owner });
+      original = doc.name;
+      alert(`Saved ${doc.name}. Fill its inputs and press Run now on its card.`);
+      side();
+    }
+  } catch (e) { alert(e.message); }
+};
+$("e-template").onclick = async () => {
+  try { const said = await api("POST", "/templates", { routine: doc });
+        alert("Kept as a template: " + said.saved); }
+  catch (e) { alert(e.message); }
+};
+</script>
+</body>
+</html>

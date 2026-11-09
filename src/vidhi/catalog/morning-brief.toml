@@ -1,0 +1,82 @@
+name = "morning-brief"
+title = "Morning brief"
+about = """
+Today's weather, your unread mail and the news headlines, fetched at the
+same time, then put together into one short message by the model and sent
+to you. Mail and headlines are optional: if one can't be reached, the
+brief goes without it."""
+version = "1"
+author = "vidhi"
+
+[inputs.latitude]
+kind = "number"
+label = "Your latitude (Raleigh is 35.78)"
+default = 35.78
+
+[inputs.longitude]
+kind = "number"
+label = "Your longitude (Raleigh is -78.64)"
+default = -78.64
+
+[inputs.unit]
+kind = "text"
+label = "fahrenheit or celsius"
+default = "fahrenheit"
+
+[inputs.mail_account]
+kind = "account"
+service = "gmail"
+label = "Which Gmail account (as you named it in Setu)"
+default = "personal"
+
+[needs]
+setu = ["gmail"]
+
+[[steps]]
+id = "weather"
+title = "Today's weather"
+call = "web_fetch"
+args = { url = "https://api.open-meteo.com/v1/forecast?latitude={{inputs.latitude}}&longitude={{inputs.longitude}}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit={{inputs.unit}}&timezone=auto&forecast_days=1" }
+at = [40, 40]
+
+[[steps]]
+id = "mail"
+title = "Unread mail"
+call = "mcp__gmail__search_threads"
+args = { account = "{{inputs.mail_account}}", query = "is:unread newer_than:1d", max_results = 10 }
+optional = true
+at = [40, 170]
+
+[[steps]]
+id = "news"
+title = "Headlines"
+call = "web_fetch"
+args = { url = "https://feeds.npr.org/1001/rss.xml" }
+optional = true
+at = [40, 300]
+
+[[steps]]
+id = "brief"
+title = "Write the brief"
+ask = """
+Write my morning brief for {{run.date}}, in at most 8 short lines, plain
+text, no headings. First the weather (high, low, chance of rain, what to
+wear), then mail worth my attention (sender and subject, skip
+newsletters), then the three biggest headlines. Leave out any part that
+is empty.
+
+The weather (JSON from open-meteo; weather_code is the WMO code):
+{{weather}}
+
+My unread mail from the last day:
+{{mail}}
+
+The news feed:
+{{news}}"""
+at = [330, 170]
+
+[[steps]]
+id = "send"
+title = "Send it to me"
+notify = "{{brief}}"
+at = [600, 170]

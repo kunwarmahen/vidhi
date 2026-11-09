@@ -1,0 +1,52 @@
+name = "cold-night"
+title = "Cold night warning"
+about = """
+Reads a temperature Prahari already keeps (an indriya), and when it is
+below your line asks you whether to tell the house. On your yes, it
+sends the message you wrote. A good one to start from a schedule in the
+evening, or from a watch on the same reading."""
+version = "1"
+author = "vidhi"
+
+[inputs.reading]
+kind = "indriya"
+label = "The reading to use (an indriya's name)"
+default = "outside-temp"
+
+[inputs.line]
+kind = "number"
+label = "Cold means below"
+default = 35
+
+[inputs.message]
+kind = "text"
+label = "What to send"
+default = "It's going to be a cold night: cover the plants and bring the cat in."
+
+[[steps]]
+id = "temp"
+title = "The temperature now"
+read = "{{inputs.reading}}"
+at = [40, 120]
+
+[[steps]]
+id = "cold"
+title = "Below the line?"
+check = "{{temp}}"
+below = "{{inputs.line}}"
+at = [260, 120]
+
+[[steps]]
+id = "go"
+title = "Ask me first"
+person = "It's {{temp}} now, below {{inputs.line}}. Send \"{{inputs.message}}\"?"
+within = "2h"
+only_if = "cold"
+at = [480, 120]
+
+[[steps]]
+id = "send"
+title = "Send it"
+notify = "{{inputs.message}}"
+only_if = "go"
+at = [700, 120]
