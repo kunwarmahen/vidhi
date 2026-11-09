@@ -58,6 +58,7 @@ code, .mono { font-family: var(--mono); font-size: 13px; }
 .hidden { display: none !important; }
 header { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margin-bottom: 22px; }
 .mark { font-family: var(--deva); font-size: 52px; line-height: .9; font-weight: 600; }
+.mark .logo { width: .9em; height: .9em; border-radius: 22%; vertical-align: -.06em; margin-right: .22em; }
 .mark small { display: block; font: 14px/1.4 var(--sans); color: var(--ink-3); margin-top: 10px; }
 .state-line { margin-left: auto; text-align: right; color: var(--ink-2); font-size: 14px; }
 .state-line b { color: var(--ink); font-weight: 600; }
@@ -152,7 +153,7 @@ path.drag { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray
 <body>
 <div class="wrap">
   <header>
-    <div class="mark">विधि<small>Vidhi: routines you draw once, which a schedule, a watch,
+    <div class="mark" lang="hi"><img class="logo" src="favicon.svg" alt="">विधि<small lang="en">Vidhi: routines you draw once, which a schedule, a watch,
       a button or a chat can start</small></div>
     <div class="state-line" id="state-line">…</div>
   </header>
