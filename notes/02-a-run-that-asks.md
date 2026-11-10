@@ -92,7 +92,9 @@ run dd7788e5 of coat-check: done
 
 No Dvara was running for this test, so the message stayed on the run
 (*nowhere*). The buttons on Telegram and the home page are tested in
-Dvara and Sarathi, and not yet pressed on a real phone.
+Dvara and Sarathi. On the house's own Telegram bot, from an iPhone,
+Yes, a choice and typed words all answered a real run (Dvara's
+notes/83); the home page and ntfy haven't been pressed for real yet.
 
 ## Not here
 
