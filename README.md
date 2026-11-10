@@ -192,9 +192,13 @@ run dd7788e5 of coat-check: waiting -- waiting for your answer (go)
 The question goes to your chat through Dvara, with **Yes** and **No**
 buttons that send `/routines yes F9SEKQ` as if you'd typed it (a choice's
 buttons send `/routines pick F9SEKQ 2`; typed words are `/routines say
-F9SEKQ ...`). On a phone's ntfy notification the same buttons are drawn,
-each carrying a mark, never a key. It's also on Vidhi's page under
-**Waiting for you**, and `vidhi answer F9SEKQ yes` at a terminal. The run is rows on disk, not a process, so it can wait
+F9SEKQ ...`, or the code alone, `/routines F9SEKQ ...`; on Telegram a
+reply to the question answers it too). On Sarathi's home page the bell
+draws the same buttons, and a box for words. On a phone's ntfy
+notification the same buttons are drawn, each carrying a mark, never a
+key; ntfy can't take typed words. It's also on Vidhi's page under
+**Waiting for you** (what you type there stays while the page looks
+again; Enter sends it), and `vidhi answer F9SEKQ yes` at a terminal. The run is rows on disk, not a process, so it can wait
 for hours and survives a restart. An answer counts once, only from the
 person it was put to. [notes/02](notes/02-a-run-that-asks.md).
 
