@@ -94,7 +94,8 @@ No Dvara was running for this test, so the message stayed on the run
 (*nowhere*). The buttons on Telegram and the home page are tested in
 Dvara and Sarathi. On the house's own Telegram bot, from an iPhone,
 Yes, a choice and typed words all answered a real run (Dvara's
-notes/83); the home page and ntfy haven't been pressed for real yet.
+notes/83); so did the home page's bell, and Yes and a choice in ntfy
+on the iPhone. Typed words can't be given in ntfy, which has no box.
 
 ## Not here
 
