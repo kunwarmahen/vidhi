@@ -257,8 +257,21 @@ async function loadStatus() {
     (s.dvara ? "<br>tells you through Dvara" : "<br>no Dvara: messages stay on the run");
 }
 
+// The questions are drawn again only when they change: the page looks every
+// five seconds, and drawing them anew took away what someone was typing.
+// When they do change, a half-typed answer (and where the cursor was) stays.
+let asksShown = null;
 async function loadAsks() {
   const asks = await api("GET", "/questions");
+  const shown = JSON.stringify(asks.map((q) => [q.code, q.text, q.until]));
+  if (shown === asksShown) return;
+  asksShown = shown;
+  const drafts = {};
+  let focused = null;
+  $("asks").querySelectorAll("[data-words]").forEach((i) => {
+    drafts[i.dataset.code] = i.value;
+    if (document.activeElement === i) focused = i.dataset.code;
+  });
   $("asks-box").classList.toggle("hidden", !asks.length);
   $("asks").innerHTML = "";
   for (const q of asks) {
@@ -268,21 +281,27 @@ async function loadAsks() {
     const buttons = q.kind === "choice"
       ? q.choices.map((c, n) => `<button class="${n ? "" : "main"}" data-a="${esc(c)}">${esc(c)}</button>`).join("")
       : q.kind === "words"
-        ? `<input type="text" maxlength="300" placeholder="a few words" class="grow" data-words="1"><button class="main" data-send="1">Send</button>`
+        ? `<input type="text" maxlength="300" placeholder="a few words" class="grow" data-words="1" data-code="${esc(q.code)}"><button class="main" data-send="1">Send</button>`
         : `<button class="main" data-a="yes">Yes</button><button data-a="no">No</button>`;
     card.innerHTML = `<div class="title">${esc(q.text)}</div>
       <div class="muted">${esc(q.owner)} · no answer by ${esc(when(q.until))} ${silence} · ${esc(q.code)}</div>
       <div class="buttons">${buttons}</div>`;
     const words = card.querySelector("[data-words]");
+    if (words) {
+      words.value = drafts[q.code] || "";
+      words.onkeydown = (e) => { if (e.key === "Enter") card.querySelector("[data-send]").click(); };
+    }
     card.querySelectorAll("button").forEach((b) => b.onclick = async () => {
       const answer = b.dataset.send ? words.value.trim() : b.dataset.a;
       if (!answer) return;
       b.disabled = true;
       try { await api("POST", `/questions/${q.code}`, { answer }); }
-      catch (e) { alert(e.message); }
+      catch (e) { alert(e.message); b.disabled = false; }
+      asksShown = null;
       refresh();
     });
     $("asks").appendChild(card);
+    if (words && focused === q.code) words.focus();
   }
 }
 

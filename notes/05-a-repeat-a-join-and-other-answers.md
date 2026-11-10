@@ -108,6 +108,15 @@ waiting on a choice is skipped ("only if mode was Heat; it was not
 answered"). Typed words nobody typed are empty. A routine that would act
 on a choice never acts because somebody was asleep.
 
+**WHAT YOU TYPE STAYS WHILE THE PAGE LOOKS.** The page looks every five
+seconds, and it drew **Waiting for you** anew each time: on the real
+house, an answer typed at a person's pace was wiped before it could be
+sent, again and again. The questions are now drawn again only when
+they change, and when they do, a half-typed answer and the cursor stay
+in its box; Enter sends it. In headless Chrome on a scratch Vidhi,
+"blue " typed a letter at a time, two refreshes, then "door": the box
+held *blue door*, still focused, and Enter finished the run.
+
 ## Live receipt
 
 A scratch Prahari and Vidhi, the real `yantra` and `qwen3.8:latest`, with
