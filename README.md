@@ -238,6 +238,7 @@ vidhi market get my-routine --from URL                      # checked against YO
 vidhi install my-routine
 vidhi market revoke my-routine --version 1 --why "..." --key ~/.ssh/id_ed25519 --as rita
 vidhi market check                                          # take-backs, from reviewers you trust
+vidhi market revoked --json                                 # what was believed (Prahari asks)
 ```
 
 **Signed on the reviewer's own computer.** `ssh-keygen -Y sign` signs
@@ -255,7 +256,9 @@ and stops listing it. `vidhi market check` (and `vidhi serve`, every six
 hours) reads the take-backs and believes one only when a reviewer *you*
 trust signed it. Then that exact text is refused by `vidhi install`, a
 routine installed from it is paused (its open runs stopped, you told
-who and why), and it can't be resumed. A copy you mended is yours.
+who and why), and it can't be resumed. A copy you mended is yours. A
+Prahari reading made from a template that was taken back is paused by
+Prahari's clock the same way, from `vidhi market revoked`.
 [notes/08](notes/08-a-review-taken-back.md).
 
 **Readings are shared the same way.** A file that says `kind =
@@ -326,6 +329,6 @@ deploy/
   public-market-tailscale.sh   the marketplace alone, behind Tailscale Funnel
 ```
 
-`uv run pytest` runs the tests (146); `uv run ruff check src tests` the
+`uv run pytest` runs the tests (147); `uv run ruff check src tests` the
 lint. No dependencies: the standard library, plus OpenSSH's `ssh-keygen`
 for signatures.

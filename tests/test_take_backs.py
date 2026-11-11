@@ -172,3 +172,16 @@ def test_a_trust_list_written_before_take_backs_still_believes_them(
     market.revoke(served, "hello", "1", "bad", keys["rita"][0], "rita")
     done, _ = market.check(state, store, Runner(store, roads), served)
     assert store.routine("ana", "hello").state == "paused" and done
+
+
+def test_the_believed_take_backs_are_listed_for_prahari(
+        served, keys, state, store, roads, capsys):
+    from vidhi import cli
+    _listed(served, keys, V1)
+    market.trust(state, "rita", keys["rita"][1])
+    market.revoke(served, "hello", "1", "bad", keys["rita"][0], "rita")
+    market.check(state, store, Runner(store, roads), served)
+    assert cli.main(["--state", str(state), "market", "revoked", "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert [(e["name"], e["sha256"], e["why"]) for e in listed] == [
+        ("hello", market.sha256(V1), "bad")]

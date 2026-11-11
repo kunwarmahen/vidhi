@@ -20,6 +20,7 @@ for anybody else: each person runs their own copy.
     vidhi market trust NAME 'ssh-ed25519 AAAA...'    a reviewer you trust
     vidhi market revoke NAME --version V --why WORDS --key KEY --as REVIEWER
     vidhi market check --from URL                    take-backs, applied here
+    vidhi market revoked --json                      the take-backs believed here
 
 and the server, ``vidhi market serve --dir DIR`` (or ``vidhi serve
 --market DIR``, on the page's own port):
@@ -97,6 +98,9 @@ text it is gets PAUSED, its open runs stopped, and its owner told who
 took the review back and why. Resuming it is refused; a mended copy is
 another text, the person's own. The hash is what makes this exact: a
 routine with the same name and a changed line is not the one reviewed.
+Every believed take-back is kept, an indriya template's too: ``vidhi
+market revoked --json`` lists them, and Prahari asks for that list to
+pause a reading made from a template whose review was taken back.
 
 THE ROUTINE ITSELF IS THE SAFETY. A routine has no code steps and no
 loops (routine.py): every call, address and prompt is in the file, in

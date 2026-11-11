@@ -64,7 +64,10 @@ Vidhi's store), and then:
   (a file, a template fetched earlier, the page, a chat), and a paused
   routine that is that text can't be resumed;
 * `vidhi list` and Vidhi's page say it under the routine's name: *review
-  taken back by rita (version 1): it says hello too often*.
+  taken back by rita (version 1): it says hello too often*;
+* `vidhi market revoked --json` lists every take-back believed here, an
+  indriya template's too: Prahari asks for it every hour and pauses a
+  reading made from that exact text (Prahari's notes/11).
 
 Mending it (`vidhi edit`, the canvas) makes another text, the person's
 own, unreviewed, and theirs to resume.
@@ -137,10 +140,9 @@ no new reviews taken back
   reviewed text; a mended copy is the person's own.
 * **A take-back that expires, or one taken back again.** A reviewer who
   changes their mind again reviews a new version.
-* **Pausing a reading made from a taken-back indriya template.** The
-  marketplace stops listing the template, so `prahari indriya install
-  --from-market` (which fetches through `vidhi market get`) refuses it
-  from then on; a reading already made from it is Prahari's, and keeps
-  reading until its owner removes it.
+* ~~**Pausing a reading made from a taken-back indriya template.**~~
+  Every believed take-back is kept, a template's too; `vidhi market
+  revoked --json` lists them, and Prahari's clock pauses a reading made
+  from a text on that list within the hour (Prahari's notes/11).
 * **Telling people who never fetched it.** They never had it; the
   marketplace stops listing it, which is enough.

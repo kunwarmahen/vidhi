@@ -231,6 +231,9 @@ def build_parser() -> argparse.ArgumentParser:
                                       "pause what they name")
     q.add_argument("--from", dest="base", default="",
                    help="one marketplace (default: every one you fetched from)")
+    q = msub.add_parser("revoked", help="the reviews taken back that this Vidhi believed "
+                                        "(Prahari asks, for its readings)")
+    q.add_argument("--json", action="store_true", dest="json_out")
     q = msub.add_parser("reviewer", help="(a marketplace's own) let someone approve")
     q.add_argument("name")
     q.add_argument("key", help="their public key line, or a .pub file")
@@ -683,6 +686,16 @@ def _market(args, state) -> int:
         if not done:
             print("no new reviews taken back" + ("" if market.markets_used(state) or args.base
                                                  else " (no marketplace used yet)"))
+    elif verb == "revoked":
+        kept = Store.at(state).revoked()
+        if args.json_out:
+            print(json.dumps(kept))
+            return 0
+        if not kept:
+            print("no reviews taken back (vidhi market check reads them)")
+        for one in kept:
+            print(f"{one['name']} v{one['version']}: taken back by {one['reviewer']} -- "
+                  f"{one['why'] or 'no reason given'}  ({one['sha256'][:12]})")
     elif verb == "get":
         path, signer = market.get(args.base, args.name, state)
         text = path.read_text()
