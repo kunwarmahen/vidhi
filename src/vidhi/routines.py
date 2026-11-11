@@ -15,10 +15,16 @@ here, so the rules hold however a routine arrives:
 * A MEND KEEPS ITS NAME. The canvas saves the routine it opened; a
   changed ``name`` would be a new routine, so it is refused there.
 * A CAP PER PERSON: ``MAX_ROUTINES``.
+* A REVIEW TAKEN BACK HOLDS EVERYWHERE. A text whose reviewer took their
+  review back (market.py's take-backs, kept by its sha256) is refused
+  here however it arrives -- a file, a template, the page, a chat -- and
+  a paused one that is that text can't be resumed. A mended copy is
+  another text: the person's own, unreviewed, and theirs to run.
 """
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from vidhi import routine as rt
@@ -32,6 +38,7 @@ def install(store: Store, owner: str, text: str, *, inputs: dict | None = None,
             runner: str = "direct", agent: str = "", source: str = "local",
             signed_by: str = "", replace: bool = False) -> Installed:
     routine = rt.parse(text)
+    _not_taken_back(store, text)
     if runner not in RUNNERS:
         raise rt.RoutineError(f"runner is {' or '.join(RUNNERS)}")
     existing = store.routine(owner, routine.name)
@@ -105,6 +112,7 @@ def pause(store: Store, owner: str, name: str) -> Installed:
 
 def resume(store: Store, owner: str, name: str) -> Installed:
     current = find(store, owner, name)
+    _not_taken_back(store, current.toml)
     store.set_routine(owner, current.name, state="active")
     return find(store, owner, current.name)
 
@@ -113,6 +121,21 @@ def remove(store: Store, owner: str, name: str) -> Installed:
     current = find(store, owner, name)
     store.uninstall(owner, current.name)
     return current
+
+
+def taken_back(store: Store, text: str) -> dict | None:
+    """The take-back that names this exact text, if a trusted reviewer made one."""
+    return store.revoked_for(hashlib.sha256(text.encode()).hexdigest())
+
+
+def _not_taken_back(store: Store, text: str) -> None:
+    found = taken_back(store, text)
+    if found:
+        raise rt.RoutineError(
+            f"{found['reviewer']} took back their review of {found['name']} version "
+            f"{found['version']}: {found['why'] or 'no reason given'}. That exact text is "
+            "not installed or resumed here; mend it (vidhi edit) to make it your own, or "
+            "install a newer reviewed version")
 
 
 def find(store: Store, owner: str, wanted: str) -> Installed:

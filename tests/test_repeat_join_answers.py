@@ -181,7 +181,7 @@ def test_a_choice_branch_names_one_of_the_choices():
 def test_typed_words_can_be_used_but_not_branched_on():
     with pytest.raises(rt.RoutineError, match="not branch on them"):
         rt.parse(WORDS + '[[steps]]\nid = "x"\nnotify = "hi"\nonly_if = "what"\n')
-    with pytest.raises(rt.RoutineError, match="choices OR typed"):
+    with pytest.raises(rt.RoutineError, match="one of choices, choices_from or typed"):
         rt.parse(MODE.replace('within = "1h"', 'within = "1h"\ntyped = true'))
 
 

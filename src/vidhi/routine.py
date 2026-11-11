@@ -40,7 +40,10 @@ read a call's address; there is no repeat without both. The repeat
 itself then says yes (it got there) or no (it ran out), so a later step
 can branch on it. A step outside the group that uses one inside it waits
 for the repeat to finish, so it never sees a half-done pass. One group
-per step, and no repeat inside another.
+per step, and no repeat inside another. ``every`` may be a list, one
+wait a pass (``["15m", "30m", "1h"]``, the last kept for the rest): each
+wait is written, and each keeps the five-minute floor, so a growing gap
+reads as what it does.
 
 TWO BRANCHES CAN JOIN AGAIN. A step that uses a skipped step is skipped
 too, so "carry on whichever way it went" can't name both branches'
@@ -62,7 +65,11 @@ true`` takes a few words the person types (``/routines say CODE ...``),
 given to later steps as ``{{mode}}`` -- and, like every step's result,
 fenced as text from outside when it goes into an ``ask``. Silence is
 still no: no choice and no words, and a step gated on a choice is
-skipped.
+skipped. ``typed = "number"`` (with ``between = [low, high]``) or
+``typed = "time"`` checks the words: a wrong answer is refused and the
+question stays open. ``choices_from = "flights"`` makes the first three
+lines a step found the choices; nothing may branch on that pick (``only_if``
+is refused), since nobody could read those choices before it ran.
 
 A CALL'S ARGUMENTS ARE THE PERSON'S YES. Installing a routine is saying
 yes to the calls in it, as accepting a watch is (Prahari): each ``call``
@@ -98,7 +105,8 @@ INPUT_KINDS = ("text", "number", "time", "yesno", "account", "channel", "indriya
 #: Keys each step may carry besides its kind.
 COMMON = {"id", "title", "after", "after_any", "only_if", "optional", "at"}
 EXTRA = {"call": {"args", "pick"}, "ask": {"tools"}, "read": {"max_age"},
-         "check": set(TESTS), "person": {"within", "choices", "typed"},
+         "check": set(TESTS),
+         "person": {"within", "choices", "choices_from", "typed", "between"},
          "wait": {"until"}, "notify": set(), "repeat": {"until", "times", "every"}}
 TOP = {"name", "title", "about", "version", "author", "inputs", "needs", "steps", "agent"}
 
@@ -128,6 +136,13 @@ MAX_TIMES, MIN_EVERY, DEFAULT_EVERY = 20, 5 * 60, "15m"
 MAX_GROUP = 10
 #: A question's choices: how many, how long each; a typed answer's length.
 MAX_CHOICES, CHOICE_LEN, MAX_TYPED = 3, 24, 300
+#: A choice found by a step: how long a line is kept (its button is
+#: shortened to ``CHOICE_LEN``, the answer is the whole line).
+FOUND_LEN = 120
+#: What a typed answer may be checked to be.
+TYPED_KINDS = ("words", "number", "time")
+#: A time typed as an answer: 7:30, 07:30, 7:30pm, 7pm.
+TYPED_TIME_RE = re.compile(r"^\s*(\d{1,2})(?::([0-5]\d))?\s*([ap]\.?m\.?)?\s*$", re.IGNORECASE)
 
 
 class RoutineError(ValueError):
@@ -175,10 +190,16 @@ class Step:
     at: list[float] = field(default_factory=list)
     #: A person step's choices (buttons), or a typed answer.
     choices: list[str] = field(default_factory=list)
-    typed: bool = False
-    #: A repeat's cap and its gap (``until`` names its stop step).
+    #: A person step whose choices are what an earlier step found, a line each.
+    choices_from: str = ""
+    #: A typed answer: "" (none), "words", "number" or "time".
+    typed: str = ""
+    #: A typed number's range, [low, high], both included.
+    between: list[float] = field(default_factory=list)
+    #: A repeat's cap and its gap (``until`` names its stop step): one
+    #: length, or a list of them, one a pass, the last kept for the rest.
     times: int = 0
-    every: str = ""
+    every: Any = ""
     #: Repeats this step waits for because it uses a step inside one (not
     #: written back: it is worked out from the routine).
     implied: set[str] = field(default_factory=set)
@@ -199,7 +220,23 @@ class Step:
     @property
     def answers(self) -> str:
         """What a person step takes: yesno, choice, or words."""
-        return "choice" if self.choices else "words" if self.typed else "yesno"
+        return "choice" if (self.choices or self.choices_from) else \
+            "words" if self.typed else "yesno"
+
+    def gap(self, passes: int) -> int:
+        """A repeat's wait, in seconds, after pass ``passes`` (1 is the first)."""
+        gaps = self.every if isinstance(self.every, list) else [self.every or DEFAULT_EVERY]
+        return duration(gaps[min(passes, len(gaps)) - 1])
+
+    @property
+    def gaps_words(self) -> str:
+        """"every 15m", or "15m, then 30m, then 1h" -- the gap as it reads."""
+        if not isinstance(self.every, list):
+            return f"every {self.every or DEFAULT_EVERY}"
+        if len(self.every) == 1:
+            return f"every {self.every[0]}"
+        return (f"waiting {', then '.join(self.every)} between passes ({self.every[-1]} "
+                "after that)")
 
     def texts(self) -> list[str]:
         """Every string this step will fill in before it runs."""
@@ -218,6 +255,8 @@ class Step:
     def waits_for(self) -> set[str]:
         """Every step that must be finished before this one starts."""
         out = self.uses() | set(self.after) | set(self.after_any) | self.implied
+        if self.choices_from:
+            out.add(self.choices_from)
         if self.kind == "repeat":
             out |= set(self.body)
         if self.gate:
@@ -247,14 +286,18 @@ class Step:
             out["within"] = _duration_words(self.within)
         if self.choices:
             out["choices"] = list(self.choices)
+        if self.choices_from:
+            out["choices_from"] = self.choices_from
         if self.typed:
-            out["typed"] = True
+            out["typed"] = True if self.typed == "words" else self.typed
+        if self.between:
+            out["between"] = [_num_out(v) for v in self.between]
         if self.until:
             out["until"] = self.until
         if self.times:
             out["times"] = self.times
         if self.every:
-            out["every"] = self.every
+            out["every"] = list(self.every) if isinstance(self.every, list) else self.every
         if self.after:
             out["after"] = list(self.after)
         if self.after_any:
@@ -522,14 +565,24 @@ def _kind_fields(step: Step, raw: dict, where: str) -> None:
 
 
 def _answers(step: Step, raw: dict, where: str) -> None:
-    """A person step's choices, or its typed answer."""
+    """A person step's choices (written, or found by a step), or its typed
+    answer and what that answer must be."""
     choices = raw.get("choices")
+    found = raw.get("choices_from")
     typed = raw.get("typed")
-    if typed is not None and not isinstance(typed, bool):
-        raise RoutineError(f"{where}: typed is true or false")
+    between = raw.get("between")
+    if typed is True:
+        typed = "words"
+    if typed in (None, False):
+        typed = ""
+    if not isinstance(typed, str) or (typed and typed not in TYPED_KINDS):
+        raise RoutineError(f"{where}: typed is true (a few words), \"number\" or \"time\"")
+    said = [k for k, v in (("choices", choices), ("choices_from", found), ("typed", typed))
+            if v not in (None, "")]
+    if len(said) > 1:
+        raise RoutineError(f"{where}: a question takes one of choices, choices_from or "
+                           f"typed, not {' and '.join(said)}")
     if choices is not None:
-        if typed:
-            raise RoutineError(f"{where}: a question takes choices OR typed words, not both")
         if (not isinstance(choices, list) or not 2 <= len(choices) <= MAX_CHOICES
                 or not all(isinstance(c, str) and c.strip() for c in choices)):
             raise RoutineError(f"{where}: choices is a list of two or three short words "
@@ -545,7 +598,89 @@ def _answers(step: Step, raw: dict, where: str) -> None:
         if len({c.lower() for c in cleaned}) != len(cleaned):
             raise RoutineError(f"{where}: two choices say the same")
         step.choices = cleaned
-    step.typed = bool(typed)
+    if found is not None:
+        if not isinstance(found, str) or not STEP_RE.match(found.strip()):
+            raise RoutineError(f"{where}: choices_from is the id of the step whose lines "
+                               "are the choices (choices_from = \"flights\")")
+        step.choices_from = found.strip()
+    step.typed = typed
+    if between is not None:
+        if typed != "number":
+            raise RoutineError(f"{where}: between is for typed = \"number\"")
+        if (not isinstance(between, list) or len(between) != 2
+                or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                           for v in between) or between[0] > between[1]):
+            raise RoutineError(f"{where}: between is [low, high], two numbers, low first")
+        step.between = [float(between[0]), float(between[1])]
+
+
+def typed_answer(step_typed: str, between: list[float], given: str) -> str:
+    """A typed answer as it is kept, or RoutineError saying what it must be:
+    a few words; a number (in its range); a time of day (07:30)."""
+    given = " ".join(str(given or "").split())
+    if not given:
+        raise RoutineError("the answer is " + typed_wants(step_typed, between))
+    if len(given) > MAX_TYPED:
+        raise RoutineError(f"the answer is {MAX_TYPED} characters at the most")
+    if step_typed == "number":
+        got = number(given) if re.fullmatch(r"[-+]?\d+(?:[.,]\d+)?\s*\S{0,3}", given) \
+            else None
+        if got is None:
+            raise RoutineError(f"the answer is {typed_wants(step_typed, between)}, not "
+                               f"{given!r}")
+        if between and not between[0] <= got <= between[1]:
+            raise RoutineError(f"the answer is {typed_wants(step_typed, between)}; "
+                               f"{_n(got)} is not")
+        return _n(got)
+    if step_typed == "time":
+        match = TYPED_TIME_RE.match(given)
+        if match:
+            hour, minute = int(match.group(1)), int(match.group(2) or 0)
+            half = (match.group(3) or "").lower().replace(".", "")
+            if half and 1 <= hour <= 12:
+                hour = hour % 12 + (12 if half == "pm" else 0)
+                half = ""
+            if not half and hour <= 23 and (match.group(2) or match.group(3)):
+                return f"{hour:02d}:{minute:02d}"
+        raise RoutineError(f"the answer is {typed_wants(step_typed, between)}, not "
+                           f"{given!r}")
+    return given
+
+
+def typed_wants(step_typed: str, between: list[float]) -> str:
+    """What a typed answer must be, in words."""
+    if step_typed == "number":
+        return ("a number" + (f" from {_n(between[0])} to {_n(between[1])}" if between
+                              else ""))
+    if step_typed == "time":
+        return "a time of day (07:30, or 7:30pm)"
+    return "a few words"
+
+
+def typed_example(step_typed: str, between: list[float]) -> str:
+    """An answer that would pass, for the line that says how to answer."""
+    if step_typed == "number":
+        return _n(round((between[0] + between[1]) / 2)) if between else "72"
+    return "07:30" if step_typed == "time" else "your words"
+
+
+def found_choices(text: str) -> tuple[list[str], int]:
+    """The choices an earlier step's result offers: its non-empty lines,
+    each tidied and cut to ``FOUND_LEN``, the same one once, the first
+    ``MAX_CHOICES``. Returns them and how many lines there were."""
+    seen: set[str] = set()
+    lines: list[str] = []
+    for raw in str(text or "").splitlines():
+        line = " ".join(raw.split()).lstrip("-*• ").strip()
+        if not line or line.lower() in seen:
+            continue
+        seen.add(line.lower())
+        lines.append(line if len(line) <= FOUND_LEN else line[:FOUND_LEN - 1] + "…")
+    return lines[:MAX_CHOICES], len(lines)
+
+
+def _num_out(value: float) -> int | float:
+    return int(value) if value == int(value) else value
 
 
 def _repeat(step: Step, raw: dict, where: str) -> None:
@@ -570,13 +705,25 @@ def _repeat(step: Step, raw: dict, where: str) -> None:
         raise RoutineError(f"{where}: a repeat says how many times at the most: times = "
                            f"N, 1 to {MAX_TIMES}")
     step.times = times
-    every = str(raw.get("every") or DEFAULT_EVERY).strip()
-    if duration(every, where) < MIN_EVERY:
-        raise RoutineError(f"{where}: every is 5 minutes at the least (a repeat that "
-                           "looks more often is a watch's job)")
-    if duration(every, where) > MAX_WAIT:
-        raise RoutineError(f"{where}: every is 7 days at the most")
-    step.every = every if raw.get("every") is not None else ""
+    every = raw.get("every")
+    if isinstance(every, list):
+        if not every or len(every) > MAX_TIMES or \
+                not all(isinstance(e, (str, int)) and not isinstance(e, bool) for e in every):
+            raise RoutineError(f"{where}: every is one length (\"15m\") or a list of them, "
+                               f"one a pass, {MAX_TIMES} at most ([\"15m\", \"30m\", \"1h\"])")
+        gaps = [str(e).strip() for e in every]
+    else:
+        gaps = [str(every or DEFAULT_EVERY).strip()]
+    for gap in gaps:
+        if duration(gap, where) < MIN_EVERY:
+            raise RoutineError(f"{where}: every is 5 minutes at the least (a repeat that "
+                               "looks more often is a watch's job)")
+        if duration(gap, where) > MAX_WAIT:
+            raise RoutineError(f"{where}: every is 7 days at the most")
+    if isinstance(every, list):
+        step.every = gaps
+    else:
+        step.every = gaps[0] if every is not None else ""
 
 
 def _check_pick(pick: str, where: str) -> None:
@@ -619,6 +766,12 @@ def _check_refs(routine: Routine) -> None:
                                        "no step by that name")
                 elif root == step.id:
                     raise RoutineError(f"step {step.id} uses its own result")
+        if step.choices_from:
+            if step.choices_from not in ids:
+                raise RoutineError(f"step {step.id}: choices_from {step.choices_from!r}, no "
+                                   "step by that name")
+            if step.choices_from == step.id:
+                raise RoutineError(f"step {step.id}: its choices can't come from itself")
         for other in [*step.after, *step.after_any]:
             if other not in ids:
                 raise RoutineError(f"step {step.id}: after {other!r}, no step by that name")
@@ -638,6 +791,11 @@ def _check_refs(routine: Routine) -> None:
                 raise RoutineError(f"step {step.id}: only_if names {gate[0]}, which takes "
                                    "typed words; a step can use them ({{" + gate[0]
                                    + "}}), not branch on them")
+            if gated.choices_from:
+                raise RoutineError(f"step {step.id}: only_if names {gate[0]}, whose choices "
+                                   f"are found when it runs ({gated.choices_from}); a step "
+                                   "can use the one picked ({{" + gate[0] + "}}), not "
+                                   "branch on it, since nobody can read the choices first")
             if gate[2] and not gated.choices:
                 raise RoutineError(f"step {step.id}: only_if \"{gate[0]} is ...\" needs "
                                    f"{gate[0]} to offer choices")
@@ -921,15 +1079,17 @@ def touches(routine: Routine, inputs: dict[str, Any] | None = None) -> list[str]
         elif step.kind == "person":
             takes = ("" if step.answers == "yesno" else
                      f", choosing {' / '.join(step.choices)}" if step.choices else
-                     ", in a few typed words")
+                     f", choosing one of what {step.choices_from} found (its first "
+                     f"{MAX_CHOICES} lines)" if step.choices_from else
+                     f", as {typed_wants(step.typed, step.between)}")
             silence = {"yesno": "no answer is no", "choice": "no answer is no choice",
                        "words": "no answer is no words"}[step.answers]
             lines.append(f"{name}: asks you \"{fill(step.body, later, inputs, {})[:120]}\""
                          f"{takes}, and waits up to {_duration_words(step.within)} "
                          f"({silence})")
         elif step.kind == "repeat":
-            lines.append(f"{name}: does {', '.join(step.body)} again, every "
-                         f"{step.every or DEFAULT_EVERY}, until {step.until} says yes, "
+            lines.append(f"{name}: does {', '.join(step.body)} again, "
+                         f"{step.gaps_words}, until {step.until} says yes, "
                          f"{step.times} times at the most")
         elif step.kind == "notify":
             lines.append(f"{name}: tells you, on your channels")

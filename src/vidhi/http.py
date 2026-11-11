@@ -133,7 +133,7 @@ class Api:
             return 200, look_inside(self.state, parts[1])
         if parts == ["routines"]:
             if method == "GET":
-                return 200, [installed_card(r) for r in self.store.routines()]
+                return 200, [installed_card(r, self.store) for r in self.store.routines()]
             if method == "POST":
                 return 201, installed_card(self._install(body))
         if len(parts) >= 3 and parts[0] == "routines":
@@ -205,7 +205,7 @@ class Api:
     def _one(self, method, owner, name, rest, body) -> tuple[int, dict]:
         if not rest:
             if method == "GET":
-                card = installed_card(routines.find(self.store, owner, name))
+                card = installed_card(routines.find(self.store, owner, name), self.store)
                 return 200, card
             if method == "PUT":
                 saved, said = routines.save(self.store, owner, name, self._text(body))
@@ -362,6 +362,15 @@ def market_route(shop: market.Market, method: str, path: str, body: dict,
             return 200, shop.reviewers()
         if len(parts) == 2 and parts[0] == "routines" and method == "GET":
             return 200, shop.listed(parts[1])
+        if len(parts) == 3 and parts[0] == "routines" and method == "GET":
+            return 200, shop.version(parts[1], parts[2])
+        if parts == ["revoked"] and method == "GET":
+            return 200, shop.revoked()
+        if len(parts) == 2 and parts[0] == "revoke" and method == "POST":
+            return 200, shop.revoke(parts[1], str(body.get("version") or ""),
+                                    str(body.get("reviewer") or ""),
+                                    str(body.get("signature") or ""),
+                                    str(body.get("why") or ""))
         if parts == ["publish"] and method == "POST":
             return 202, shop.publish(str(body.get("toml") or ""),
                                      str(body.get("publisher") or ""),

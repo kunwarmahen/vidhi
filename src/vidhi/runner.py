@@ -21,8 +21,15 @@ yes doesn't send it because somebody was asleep. A question with
 choices, or one that takes typed words, unanswered gives nothing, and a
 step that waited on a choice is skipped.
 
+A WRONG ANSWER ASKS AGAIN. A typed answer that must be a number (in its
+range) or a time of day, and isn't, is refused with what it must be, and
+the question stays open with its code. Choices a step found are its
+first three lines, each a button cut short, the answer the whole line;
+a step that found none leaves the question unasked.
+
 A REPEAT IS A WAIT, THEN THE SAME STEPS AGAIN. When its stop step said
-no and passes are left, the repeat waits ``every`` (a row with a time,
+no and passes are left, the repeat waits ``every`` (that pass's wait,
+when ``every`` is a list) (a row with a time,
 like a ``wait`` step: nothing is held open), then puts its group back to
 pending -- their old results, and any question they asked, forgotten --
 and the run carries on as if those steps had never run. What each pass
@@ -379,12 +386,24 @@ class Runner:
         if kind == "person":
             question = self.store.question_for(run.id, step.id)
             if question is None:
+                choices = list(step.choices)
+                if step.choices_from:
+                    choices, there = rt.found_choices(results.get(step.choices_from, ""))
+                    if not choices:
+                        self._done(run, step, Done(True, "", ""),
+                                   why=f"{step.choices_from} found nothing to choose from, "
+                                       "so nobody was asked")
+                        return
+                    if there > len(choices):
+                        self.store.set_step(run.id, step.id,
+                                            detail=f"{step.choices_from} found {there}; the "
+                                                   f"first {len(choices)} were offered")
                 text = rt.fill(step.body, results, inputs, info)
                 until = now() + timedelta(seconds=step.within)
                 question = self.store.ask(Question(
                     code="", run_id=run.id, step_id=step.id, owner=run.owner, text=text,
                     asked_at=iso(now()), until=iso(until), kind=step.answers,
-                    choices=list(step.choices)))
+                    choices=choices, expects=_expects(step)))
                 said = self._put(who, routine, question, until)
                 self.store.set_question(question.code, told=said)
             self.store.set_step(run.id, step.id, state="waiting", wake_at=question.until,
@@ -421,7 +440,7 @@ class Runner:
                                 why=f"{step.until} still said no after {passes} "
                                     f"pass{'es' if passes != 1 else ''} ({how})")
             return
-        wake = self.now() + timedelta(seconds=rt.duration(step.every or rt.DEFAULT_EVERY))
+        wake = self.now() + timedelta(seconds=step.gap(passes))
         self.store.set_step(run.id, step.id, state="waiting", wake_at=iso(wake),
                             passes=passes, detail="\n".join(log),
                             why=f"pass {passes} of {step.times}: {how}; again at "
@@ -432,14 +451,17 @@ class Runner:
         code = question.code
         by = local_now(until).strftime("%a %H:%M")
         if question.kind == "choice":
-            taps = [{"word": f"/routines pick {code} {n}", "label": choice}
+            taps = [{"word": f"/routines pick {code} {n}", "label": _label(choice)}
                     for n, choice in enumerate(question.choices, 1)]
             how = "Answer: " + "   or   ".join(f"/routines pick {code} {n} ({choice})"
                                                for n, choice in enumerate(question.choices, 1))
             silence = "No answer by {by} is no choice."
         elif question.kind == "words":
             taps = []
-            how = f"Answer in a few words: /routines say {code} your words"
+            typed, between = expected(question.expects)
+            how = (f"Answer {'in' if typed == 'words' else 'with'} "
+                   f"{rt.typed_wants(typed, between)}: /routines say {code} "
+                   + rt.typed_example(typed, between))
             silence = "No answer by {by} is no answer."
         else:
             taps = [{"word": f"/routines yes {code}", "label": "Yes"},
@@ -492,18 +514,38 @@ def _said(question: Question, word: str) -> str:
         raise RunError("the answer is one of: " + ", ".join(
             f"{n} {c}" for n, c in enumerate(question.choices, 1)))
     if question.kind == "words":
-        given = " ".join(word.split())
-        if not given:
-            raise RunError("the answer is a few words")
-        if len(given) > rt.MAX_TYPED:
-            raise RunError(f"the answer is {rt.MAX_TYPED} characters at the most")
-        return given
+        typed, between = expected(question.expects)
+        try:
+            return rt.typed_answer(typed, between, word)
+        except rt.RoutineError as exc:
+            raise RunError(f"{exc}; {question.code} is still waiting for it") from None
     said = word.strip().lower()
     if said in YES:
         return "yes"
     if said in NO:
         return "no"
     raise RunError("the answer is yes or no")
+
+
+def _expects(step: rt.Step) -> str:
+    """What a typed answer must be, as a question keeps it."""
+    if step.typed == "number" and step.between:
+        return "number:" + ":".join(rt._n(v) for v in step.between)
+    return step.typed if step.typed in ("number", "time") else ""
+
+
+def expected(expects: str) -> tuple[str, list[float]]:
+    head, *rest = (expects or "words").split(":")
+    try:
+        between = [float(v) for v in rest] if len(rest) == 2 else []
+    except ValueError:
+        between = []
+    return head, between
+
+
+def _label(choice: str) -> str:
+    """A choice as its button says it: short (the answer is the whole line)."""
+    return choice if len(choice) <= rt.CHOICE_LEN else choice[:rt.CHOICE_LEN - 1] + "…"
 
 
 def _quoted(question: Question) -> str:
@@ -566,9 +608,16 @@ def describe(store: Store, run: Run) -> dict:
     return {**run.as_dict(), "steps": steps, "questions": questions}
 
 
-def installed_card(installed: Installed) -> dict:
-    """An installed routine as a page or a program reads it."""
+def installed_card(installed: Installed, store: Store | None = None) -> dict:
+    """An installed routine as a page or a program reads it (with
+    ``store``: whether a trusted reviewer took its review back)."""
     out = installed.as_dict()
+    if store is not None:
+        from vidhi.routines import taken_back
+        found = taken_back(store, installed.toml)
+        if found:
+            out["taken_back"] = {k: found[k] for k in ("reviewer", "version", "why",
+                                                       "revoked_at", "market")}
     try:
         routine = rt.parse(installed.toml)
     except rt.RoutineError as exc:

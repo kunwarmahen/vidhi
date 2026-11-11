@@ -18,6 +18,8 @@ for anybody else: each person runs their own copy.
     vidhi market list --from URL                     what is listed
     vidhi market get NAME --from URL                 fetch one, check its signature
     vidhi market trust NAME 'ssh-ed25519 AAAA...'    a reviewer you trust
+    vidhi market revoke NAME --version V --why WORDS --key KEY --as REVIEWER
+    vidhi market check --from URL                    take-backs, applied here
 
 and the server, ``vidhi market serve --dir DIR`` (or ``vidhi serve
 --market DIR``, on the page's own port):
@@ -31,6 +33,9 @@ and the server, ``vidhi market serve --dir DIR`` (or ``vidhi serve
     GET  /market/queue              what waits, oldest first
     GET  /market/queue/ID           one, with the review notes
     POST /market/review/ID          {decision, reviewer, signature, why}
+    GET  /market/routines/NAME/V    one version, listed or taken back
+    POST /market/revoke/NAME        {version, reviewer, signature, why}
+    GET  /market/revoked            every review taken back, each signed
 
 REACHABLE FROM OUTSIDE, ALONE. ``vidhi market serve`` serves only
 ``/market/`` -- no page of anybody's routines, no API -- so it can be
@@ -72,6 +77,27 @@ installable here; it can only fail to list one. ``vidhi install`` checks
 once more, so a file changed on disk after it was fetched isn't
 installed.
 
+A REVIEW CAN BE TAKEN BACK, BY WHO GAVE IT. A reviewer who finds they
+were wrong signs ``revoke NAME VERSION SHA256: why`` (namespace
+``vidhi-revoke``) on their own computer: ``vidhi market revoke NAME
+--version V --why WORDS --key KEY --as REVIEWER``. The server takes it
+only from the reviewer whose signature listed that version -- another
+reviewer can disagree, not unsign -- and stops listing it (an older
+version, still signed, is listed again). It keeps the signed take-back
+at ``/market/revoked`` for everybody who already fetched it.
+
+EACH VIDHI CHECKS THE TAKE-BACKS ITSELF. ``vidhi market check`` (and
+``vidhi serve``, every six hours, against the marketplaces it fetched
+from) reads ``/market/revoked`` and believes a take-back only when it is
+signed by a reviewer THIS person trusts -- the same list ``get`` checks
+against -- so a broken-into server can't pause anybody's routines. A
+believed take-back is kept by the exact text's sha256 (store.py): that
+text is refused by ``vidhi install``, and an installed routine whose
+text it is gets PAUSED, its open runs stopped, and its owner told who
+took the review back and why. Resuming it is refused; a mended copy is
+another text, the person's own. The hash is what makes this exact: a
+routine with the same name and a changed line is not the one reviewed.
+
 THE ROUTINE ITSELF IS THE SAFETY. A routine has no code steps and no
 loops (routine.py): every call, address and prompt is in the file, in
 words, for the reviewer and then the installer to read. And every run
@@ -83,6 +109,7 @@ verifies.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -103,6 +130,9 @@ from vidhi.store import iso, now_utc
 
 NAMESPACE = "vidhi-routine"
 REJECT_NAMESPACE = "vidhi-reject"
+REVOKE_NAMESPACE = "vidhi-revoke"
+#: What a trusted reviewer's signature may be for.
+NAMESPACES = (NAMESPACE, REJECT_NAMESPACE, REVOKE_NAMESPACE)
 MAX_ROUTINE = 64 * 1024
 #: Routines one address may publish in an hour.
 PUBLISH_PER_HOUR = 10
@@ -155,6 +185,7 @@ def verify(text: str, signature: str, allowed: Path, *,
     if not Path(allowed).is_file() or not Path(allowed).read_text().strip():
         raise MarketError(f"no reviewers are trusted yet ({allowed}): vidhi market trust "
                           "NAME 'ssh-ed25519 AAAA...'")
+    _upgrade(Path(allowed))
     with tempfile.TemporaryDirectory() as tmp:
         sig = Path(tmp) / "sig"
         sig.write_text(signature)
@@ -174,6 +205,25 @@ def verify(text: str, signature: str, allowed: Path, *,
                       "signed, or signed for something else")
 
 
+def _upgrade(path: Path) -> None:
+    """A reviewers file written before take-backs lets its reviewers sign
+    those too: the same people, one more thing they may sign."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return
+    wanted = f'namespaces="{",".join(NAMESPACES)}"'
+    lines = [re.sub(r'namespaces="[^"]*"', wanted, ln) if "namespaces=" in ln else ln
+             for ln in text.splitlines()]
+    new = "\n".join(lines) + "\n"
+    if new != text:
+        path.write_text(new)
+
+
+def sha256(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 def trusted_file(state: Path) -> Path:
     return Path(state) / "reviewers"
 
@@ -190,7 +240,7 @@ def trust(state: Path, name: str, public_key: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
              if ln.strip() and ln.split()[0] != name]
-    lines.append(f'{name} namespaces="{NAMESPACE},{REJECT_NAMESPACE}" {words[0]} {words[1]}')
+    lines.append(f'{name} namespaces="{",".join(NAMESPACES)}" {words[0]} {words[1]}')
     path.write_text("\n".join(lines) + "\n")
     return path
 
@@ -210,6 +260,16 @@ def check_installable(state: Path, path: Path, text: str) -> str:
     if not sig.is_file():
         raise MarketError(f"{path.name} has no signature beside it: not installable")
     return verify(text, sig.read_text(), trusted_file(state))
+
+
+def refuse_revoked(store, text: str) -> None:
+    """MarketError when a trusted reviewer took back their review of this
+    exact text (``check``)."""
+    found = store.revoked_for(sha256(text))
+    if found:
+        raise MarketError(f"{found['reviewer']} took back their review of {found['name']} "
+                          f"version {found['version']}: {found['why'] or 'no reason given'}."
+                          " It is not installed or run here")
 
 
 #: Tools a call may use that are plainly reading: anything else is said.
@@ -481,10 +541,65 @@ class Market:
             return {**meta, "status": "rejected"}
         raise MarketError("decision is approve or reject")
 
+    def revoke(self, name: str, version: str, reviewer: str, signature: str,
+               why: str) -> dict:
+        """Take a review back: only its own reviewer, signed, with a why."""
+        if not why.strip():
+            raise MarketError("a take-back says why")
+        folder = self.root / "listed" / _safe(name) / _safe(version)
+        if not (folder / "routine.toml").is_file():
+            raise MarketError(f"no {name} version {version} is listed")
+        meta = _meta(folder)
+        if (folder / "revoked.json").exists():
+            raise MarketError(f"{name} version {version}'s review was already taken back")
+        text = (folder / "routine.toml").read_text()
+        signer = verify(_revoke_words(name, version, sha256(text), why), signature,
+                        self.reviewers_file, namespace=REVOKE_NAMESPACE)
+        if signer != reviewer:
+            raise MarketError(f"signed by {signer}, not {reviewer}")
+        if signer != meta.get("reviewer"):
+            raise MarketError(f"{name} version {version} was reviewed by "
+                              f"{meta.get('reviewer')}; only they can take it back (you can "
+                              "publish a newer version, or tell people why)")
+        entry = {"name": meta.get("name") or name, "version": str(meta.get("version")
+                                                                   or version),
+                 "sha256": sha256(text), "reviewer": signer, "why": why.strip()[:1000],
+                 "signature": signature, "revoked_at": iso(now_utc())}
+        (folder / "revoked.json").write_text(json.dumps(entry, indent=2))
+        return {**entry, "status": "taken back"}
+
+    def revoked(self) -> list[dict]:
+        out = []
+        for path in sorted((self.root / "listed").glob("*/*/revoked.json")):
+            try:
+                entry = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if isinstance(entry, dict):
+                out.append(entry)
+        return sorted(out, key=lambda e: e.get("revoked_at") or "")
+
+    def version(self, name: str, version: str) -> dict:
+        """One version, listed or taken back, with its signature."""
+        folder = self.root / "listed" / _safe(name) / _safe(version)
+        if not (folder / "routine.toml.sig").is_file():
+            raise MarketError(f"no {name} version {version} was listed")
+        text = (folder / "routine.toml").read_text()
+        revoked = folder / "revoked.json"
+        return {**_meta(folder), "kind": kind_of(text), "toml": text,
+                "signature": (folder / "routine.toml.sig").read_text(),
+                "sha256": sha256(text),
+                "revoked": json.loads(revoked.read_text()) if revoked.exists() else None}
+
+    def _versions(self, name_dir: Path) -> list[Path]:
+        """A name's versions still listed: signed, and not taken back."""
+        return [v for v in name_dir.iterdir() if (v / "routine.toml.sig").exists()
+                and not (v / "revoked.json").exists()]
+
     def index(self) -> list[dict]:
         out = []
         for name_dir in sorted((self.root / "listed").iterdir()):
-            versions = [v for v in name_dir.iterdir() if (v / "routine.toml.sig").exists()]
+            versions = self._versions(name_dir)
             if not versions:
                 continue
             newest = max(versions, key=lambda v: (_meta(v).get("approved_at") or ""))
@@ -526,8 +641,7 @@ class Market:
 
     def listed(self, name: str) -> dict:
         folder = self.root / "listed" / _safe(name)
-        versions = [v for v in folder.iterdir()] if folder.is_dir() else []
-        versions = [v for v in versions if (v / "routine.toml.sig").exists()]
+        versions = self._versions(folder) if folder.is_dir() else []
         if not versions:
             raise MarketError(f"no routine {name} is listed")
         newest = max(versions, key=lambda v: (_meta(v).get("approved_at") or ""))
@@ -550,6 +664,10 @@ def _a(kind: str) -> str:
 
 def _reject_words(ident: str, why: str) -> str:
     return f"reject {ident}: {why.strip()}\n"
+
+
+def _revoke_words(name: str, version: str, digest: str, why: str) -> str:
+    return f"revoke {name} {version} {digest}: {why.strip()}\n"
 
 
 def _meta(folder: Path) -> dict:
@@ -622,6 +740,109 @@ def reject(base: str, ident: str, why: str, key: Path, reviewer: str) -> dict:
     return _http("POST", _url(base, f"/market/review/{urllib.parse.quote(ident)}"),
                  {"decision": "reject", "reviewer": reviewer, "signature": signature,
                   "why": why})
+
+
+def revoke(base: str, name: str, version: str, why: str, key: Path,
+           reviewer: str) -> dict:
+    """Take back a review: the version's exact text fetched, its hash and
+    the why signed HERE, the signature sent."""
+    if not why.strip():
+        raise MarketError("a take-back says why (--why)")
+    item = _http("GET", _url(base, f"/market/routines/{urllib.parse.quote(name)}/"
+                                   f"{urllib.parse.quote(str(version))}"))
+    digest = sha256(str(item.get("toml") or ""))
+    signature = sign(_revoke_words(name, str(version), digest, why), key, REVOKE_NAMESPACE)
+    return _http("POST", _url(base, f"/market/revoke/{urllib.parse.quote(name)}"),
+                 {"version": str(version), "reviewer": reviewer, "signature": signature,
+                  "why": why})
+
+
+def take_backs(base: str, state: Path) -> tuple[list[dict], list[str]]:
+    """The marketplace's take-backs, each checked HERE: (believed -- signed
+    by a reviewer this person trusts -- and what was set aside, in words)."""
+    found = _http("GET", _url(base, "/market/revoked"))
+    believed, ignored = [], []
+    for entry in found if isinstance(found, list) else []:
+        try:
+            words = _revoke_words(str(entry["name"]), str(entry["version"]),
+                                  str(entry["sha256"]), str(entry.get("why") or ""))
+            signer = verify(words, str(entry.get("signature") or ""), trusted_file(state),
+                            namespace=REVOKE_NAMESPACE)
+        except (KeyError, TypeError):
+            ignored.append("a take-back that doesn't read")
+            continue
+        except MarketError as exc:
+            ignored.append(f"{entry.get('name')} v{entry.get('version')}: {exc}")
+            continue
+        if signer != entry.get("reviewer"):
+            ignored.append(f"{entry.get('name')} v{entry.get('version')}: signed by "
+                           f"{signer}, said to be {entry.get('reviewer')}")
+            continue
+        believed.append(entry)
+    return believed, ignored
+
+
+def apply_take_backs(store, runner, entries: list[dict], market: str = "") -> list[str]:
+    """Keep each believed take-back, and pause every installed routine
+    whose exact text it names: its open runs stopped, its owner told.
+    What was done, one line each."""
+    from vidhi.roads import Who
+    said = []
+    for entry in entries:
+        new = store.add_revoked(entry, market)
+        for installed in store.routines(None):
+            if sha256(installed.toml) != entry["sha256"]:
+                continue
+            if installed.state == "active":
+                store.set_routine(installed.owner, installed.name, state="paused")
+            stopped = []
+            for run in store.runs(owner=installed.owner, routine=installed.name, limit=100):
+                if run.state in ("queued", "running", "waiting"):
+                    try:
+                        runner.stop(run.id)
+                        stopped.append(run.id)
+                    except ValueError:
+                        pass
+            if new:
+                line = (f"{installed.name}: paused. {entry['reviewer']} took back their "
+                        f"review of version {entry['version']}: "
+                        f"{entry.get('why') or 'no reason given'}"
+                        + (f" (stopped {len(stopped)} open run"
+                           f"{'s' if len(stopped) != 1 else ''})" if stopped else ""))
+                said.append(f"{installed.owner}: {line}")
+                runner.roads.tell(Who(owner=installed.owner, runner=installed.runner,
+                                      agent=installed.agent, run_id="",
+                                      routine=installed.name),
+                                  f"Vidhi: {line}. It stays paused; a mended copy is your "
+                                  "own (vidhi edit), or install a newer reviewed version.")
+        if new:
+            said.append(f"taken back: {entry['name']} v{entry['version']} by "
+                        f"{entry['reviewer']}")
+    return said
+
+
+def markets_used(state: Path) -> list[str]:
+    """Every marketplace this Vidhi fetched from, and VIDHI_MARKET."""
+    found = {p.read_text().strip().rstrip("/")
+             for p in (Path(state) / "market").rglob("*.from") if p.is_file()}
+    env = os.environ.get("VIDHI_MARKET", "").strip().rstrip("/")
+    if env:
+        found.add(env)
+    return sorted(u for u in found if u)
+
+
+def check(state: Path, store, runner, base: str = "") -> tuple[list[str], list[str]]:
+    """Take-backs from one marketplace (or every one used): (done, set aside)."""
+    done, ignored = [], []
+    for url in ([base.rstrip("/")] if base else markets_used(state)):
+        try:
+            believed, skipped = take_backs(url, state)
+        except MarketError as exc:
+            ignored.append(f"{url}: {exc}")
+            continue
+        done += apply_take_backs(store, runner, believed, url)
+        ignored += skipped
+    return done, ignored
 
 
 def index(base: str) -> list:

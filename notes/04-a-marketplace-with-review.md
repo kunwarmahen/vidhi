@@ -110,5 +110,6 @@ spot; they're now laid out by when they run.
 * ~~**A public address for the marketplace.**~~ Alone on its own port,
   behind Tailscale Funnel, with a page and its reviewers' keys
   ([06](06-a-marketplace-others-can-reach.md)).
-* **Revoking a signature.** Removing a reviewer from your own list stops
-  new installs signed by them; routines already installed stay.
+* ~~**Revoking a signature.**~~ The reviewer signs a take-back; every
+  Vidhi that trusts them refuses and pauses that exact text, already
+  installed or not ([08](08-a-review-taken-back.md)).

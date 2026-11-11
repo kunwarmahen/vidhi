@@ -38,14 +38,18 @@ side at the same time, and remembers where each run got to.
   the exact file that would be kept.
 * **A routine can stop and ask you.** An *ask me* step puts a question
   in your chat: yes or no, or two or three choices (*Heat*, *Cool*,
-  *Leave it*), each a button, or a few words you type. The run waits,
+  *Leave it*), each a button, or choices an earlier step found (*which
+  of these three flights?*), or a few words you type, which can be
+  checked to be a number (from 60 to 80) or a time of day. A wrong
+  answer is refused and the question waits for a right one. The run waits,
   for a minute or a day, with nothing held open. When you answer, on
   your phone, the page or a notification, it carries on from there. No
   answer in time is no.
 * **A routine can try again, a set number of times.** *"Look at the
   temperature every 15 minutes until it's above 68, four times at
   most."* The cap and the gap are written in the routine, where anyone
-  reading it sees them.
+  reading it sees them. The gap can grow: *15 minutes, then 30, then
+  every hour*, each wait written.
 * **Anything can start one.** **Run now** on the page; `/routines run 1`
   in a chat; *"do my morning brief"* to your agent; a Samay schedule
   (*every day at 7:00*); a Prahari watch (*when the porch gets below
@@ -56,7 +60,9 @@ side at the same time, and remembers where each run got to.
 * **Routines can be shared, safely.** Anyone can publish a routine to a
   marketplace. Nobody can install it until a reviewer has read it and
   signed it with their own key, and your Vidhi checks that signature
-  against the reviewers *you* trust.
+  against the reviewers *you* trust. A reviewer who finds they were
+  wrong can take the review back; your Vidhi then pauses that routine
+  and tells you why.
 
 ## Try it
 
@@ -141,15 +147,18 @@ notify = "{{wear}}"
 | `check = "{{x}}"` and one of `below`, `above`, `at_most`, `at_least`, `equals`, `contains`, `lacks`, `matches` | a test, no model | `yes` or `no` |
 | `person = "..."`, `within = "2h"` | a yes/no question to you; the run waits | `yes`, or `no` (also when nobody answers in time) |
 | `person = "..."`, `choices = ["Heat", "Cool", "Leave it"]` | two or three choices, each a button | the choice, or nothing when nobody answers |
+| `person = "..."`, `choices_from = "flights"` | the first three lines that step found, each a button (cut short on the button) | the whole line picked, or nothing |
 | `person = "..."`, `typed = true` | a few words you type (`/routines say CODE ...`) | your words (fenced as outside text in an `ask`) |
+| `person = "..."`, `typed = "number"`, `between = [60, 80]`; or `typed = "time"` | a typed answer that must be a number (in its range) or a time of day; a wrong one is refused and the question stays open | the number (`74`), or the time (`07:30`) |
 | `wait = "30m"` or `until = "07:30"` | a pause | nothing |
 | `notify = "..."` | a message on your channels | where it went |
-| `repeat = ["temp", "warm"]`, `until = "warm"`, `times = 4`, `every = "15m"` | those steps again, `every` apart (5m at least), until `until` says yes, `times` times at most (20) | `yes` (it got there) or `no` (it ran out) |
+| `repeat = ["temp", "warm"]`, `until = "warm"`, `times = 4`, `every = "15m"` | those steps again, `every` apart (5m at least), until `until` says yes, `times` times at most (20); `every = ["15m", "30m", "1h"]` is a wait for each pass, the last kept | `yes` (it got there) or `no` (it ran out) |
 
 Every step may also have `title`, `after = ["id"]` (wait for a step it
 doesn't use), `only_if = "go"` or `only_if = "not go"` (only when a
 `check`, `person` or `repeat` step said yes, or no), `only_if = "mode is
-Heat"` (only when that choice was made), `after_any = ["plan", "sorry"]`
+Heat"` (only when that written choice was made; never on a found
+choice or typed words), `after_any = ["plan", "sorry"]`
 (run when any one of those ran, with `{{any}}` its result: two branches
 joined again), and `optional = true` (if it fails, it gives nothing and
 the run goes on).
@@ -167,7 +176,8 @@ the run's own.
   refused when it's read, and there is no step that runs a program. A
   `repeat` always says how many times at most and when to stop.
   Everything a routine does is in the file, in words
-  ([notes/05](notes/05-a-repeat-a-join-and-other-answers.md)).
+  ([notes/05](notes/05-a-repeat-a-join-and-other-answers.md),
+  [notes/07](notes/07-a-growing-wait-a-found-choice-a-checked-answer.md)).
 * **A call's arguments are your yes.** Each call runs with a grant fixing
   exactly its arguments, as a Prahari look does. A call whose arguments
   come from an earlier step can't have been seen, so it runs only if its
@@ -226,6 +236,8 @@ vidhi market approve ID --from URL --key ~/.ssh/id_ed25519 --as rita
 vidhi market trust rita ~/rita.pub                          # once, on your computer
 vidhi market get my-routine --from URL                      # checked against YOUR list
 vidhi install my-routine
+vidhi market revoke my-routine --version 1 --why "..." --key ~/.ssh/id_ed25519 --as rita
+vidhi market check                                          # take-backs, from reviewers you trust
 ```
 
 **Signed on the reviewer's own computer.** `ssh-keygen -Y sign` signs
@@ -235,6 +247,16 @@ server can't make a routine installable on your computer, and a routine
 changed after it was signed is refused. The marketplace is `vidhi market
 serve` (kept in `~/.vidhi-market`), or `vidhi serve --market DIR` on the
 page's own port. [notes/04](notes/04-a-marketplace-with-review.md).
+
+**A review can be taken back, by who gave it.** `vidhi market revoke`
+signs a take-back of one version's exact text, with a why; the
+marketplace takes it only from the reviewer who signed that version,
+and stops listing it. `vidhi market check` (and `vidhi serve`, every six
+hours) reads the take-backs and believes one only when a reviewer *you*
+trust signed it. Then that exact text is refused by `vidhi install`, a
+routine installed from it is paused (its open runs stopped, you told
+who and why), and it can't be resumed. A copy you mended is yours.
+[notes/08](notes/08-a-review-taken-back.md).
 
 **Readings are shared the same way.** A file that says `kind =
 "indriya"` is a Prahari reading with blanks (the outside temperature for
@@ -251,6 +273,9 @@ the address: what's listed, the reviewers' keys (to compare with what
 they published elsewhere, never to trust from there), and the commands.
 Set `VIDHI_MARKET` to its address and Vidhi's page shows what it lists
 with a **Get it** button. [notes/06](notes/06-a-marketplace-others-can-reach.md).
+Making someone a reviewer (they make a key, send you its public half,
+you add it, they publish it where people can compare it):
+[notes/08](notes/08-a-review-taken-back.md).
 
 ## Where things are
 
@@ -274,17 +299,21 @@ with a **Get it** button. [notes/06](notes/06-a-marketplace-others-can-reach.md)
 ```
 src/vidhi/
   routine.py   the format: reading, checking, waves, filling in, words
-               (notes/01); repeat, after_any, choices (notes/05)
-  store.py     one SQLite file: routines, runs, steps, questions
+               (notes/01); repeat, after_any, choices (notes/05);
+               growing waits, found choices, checked typing (notes/07)
+  store.py     one SQLite file: routines, runs, steps, questions, and
+               reviews taken back (notes/08)
   runner.py    a run worked forward, side by side; stopping to ask,
                picked up again; one worker per run (notes/02)
   roads.py     who does each step: yantra, Dvara as the person, prahari
   clock.py     what `vidhi serve` keeps: queued runs started, waits woken
-               (notes/03)
-  routines.py  installing, mending, pausing: one place for every door
+               (notes/03); take-backs read every six hours (notes/08)
+  routines.py  installing, mending, pausing: one place for every door;
+               a taken-back text refused on all of them (notes/08)
   catalog.py   templates: yours, a marketplace's, Vidhi's own
   market.py    publish, review, sign, fetch, check (notes/04); indriya
-               templates, reviewers, the public page (notes/06)
+               templates, reviewers, the public page (notes/06);
+               take-backs, signed and checked (notes/08)
   http.py      the page's API, and the marketplace's routes
   mcp.py       seven tools for an agent; none writes a step
   status.py    `vidhi status --json`, for the family
@@ -297,6 +326,6 @@ deploy/
   public-market-tailscale.sh   the marketplace alone, behind Tailscale Funnel
 ```
 
-`uv run pytest` runs the tests (116); `uv run ruff check src tests` the
+`uv run pytest` runs the tests (146); `uv run ruff check src tests` the
 lint. No dependencies: the standard library, plus OpenSSH's `ssh-keygen`
 for signatures.

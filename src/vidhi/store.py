@@ -68,15 +68,22 @@ CREATE TABLE IF NOT EXISTS questions (
     owner TEXT NOT NULL, text TEXT NOT NULL, asked_at TEXT NOT NULL,
     until TEXT NOT NULL, answer TEXT NOT NULL DEFAULT '',
     answered_at TEXT, via TEXT NOT NULL DEFAULT '', told TEXT NOT NULL DEFAULT '',
-    kind TEXT NOT NULL DEFAULT 'yesno', choices TEXT NOT NULL DEFAULT '[]');
+    kind TEXT NOT NULL DEFAULT 'yesno', choices TEXT NOT NULL DEFAULT '[]',
+    expects TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS questions_by_owner ON questions (owner, answer);
+CREATE TABLE IF NOT EXISTS revoked (
+    sha256 TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
+    reviewer TEXT NOT NULL, why TEXT NOT NULL DEFAULT '',
+    revoked_at TEXT NOT NULL DEFAULT '', market TEXT NOT NULL DEFAULT '',
+    learned_at TEXT NOT NULL);
 """
 
 
 #: Columns a file made before them lacks, added when it is opened.
 ADDED = {"steps": (("passes", "INTEGER NOT NULL DEFAULT 0"),),
          "questions": (("kind", "TEXT NOT NULL DEFAULT 'yesno'"),
-                       ("choices", "TEXT NOT NULL DEFAULT '[]'"))}
+                       ("choices", "TEXT NOT NULL DEFAULT '[]'"),
+                       ("expects", "TEXT NOT NULL DEFAULT ''"))}
 
 
 def now_utc() -> datetime:
@@ -181,6 +188,8 @@ class Question:
     #: what it takes: yesno, choice (one of ``choices``), or words
     kind: str = "yesno"
     choices: list = field(default_factory=list)
+    #: what typed words must be: "" (any words), "number", "number:60:80", "time"
+    expects: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -362,10 +371,10 @@ class Store:
         question.code = question.code or _code()
         self._run(
             "INSERT INTO questions (code, run_id, step_id, owner, text, asked_at, until, "
-            "told, kind, choices) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "told, kind, choices, expects) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (question.code, question.run_id, question.step_id, question.owner,
              question.text, question.asked_at, question.until, question.told,
-             question.kind, json.dumps(question.choices)))
+             question.kind, json.dumps(question.choices), question.expects))
         return question
 
     def question(self, code: str) -> Question | None:
@@ -401,6 +410,27 @@ class Store:
     def set_question(self, code: str, **values) -> None:
         sets = ", ".join(f"{k} = ?" for k in values)
         self._run(f"UPDATE questions SET {sets} WHERE code = ?", (*values.values(), code))
+
+
+    # -- reviews taken back (market.py) ----------------------------------------------
+
+    def add_revoked(self, entry: dict, market: str = "") -> bool:
+        """A review a trusted reviewer took back, kept by the exact text's
+        sha256. True when it is new here."""
+        return self._run(
+            "INSERT OR IGNORE INTO revoked (sha256, name, version, reviewer, why, "
+            "revoked_at, market, learned_at) VALUES (?,?,?,?,?,?,?,?)",
+            (entry["sha256"], entry["name"], str(entry["version"]), entry["reviewer"],
+             str(entry.get("why") or "")[:1000], str(entry.get("revoked_at") or ""),
+             market, iso(now_utc()))) > 0
+
+    def revoked_for(self, sha256: str) -> dict | None:
+        rows = self._rows("SELECT * FROM revoked WHERE sha256 = ?", (sha256,))
+        return dict(rows[0]) if rows else None
+
+    def revoked(self) -> list[dict]:
+        return [dict(r) for r in self._rows("SELECT * FROM revoked ORDER BY learned_at DESC",
+                                            ())]
 
 
 #: A question's code: short enough to type on a phone, no 0/O or 1/I.

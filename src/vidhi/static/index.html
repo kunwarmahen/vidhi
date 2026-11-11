@@ -261,6 +261,13 @@ async function loadStatus() {
 // five seconds, and drawing them anew took away what someone was typing.
 // When they do change, a half-typed answer (and where the cursor was) stays.
 let asksShown = null;
+// What a typed answer must be, as its box says it (Vidhi checks it again).
+function wants(expects) {
+  const [kind, lo, hi] = (expects || "").split(":");
+  if (kind === "number") return lo !== undefined ? `a number from ${lo} to ${hi}` : "a number";
+  if (kind === "time") return "a time, 07:30";
+  return "a few words";
+}
 async function loadAsks() {
   const asks = await api("GET", "/questions");
   const shown = JSON.stringify(asks.map((q) => [q.code, q.text, q.until]));
@@ -281,7 +288,7 @@ async function loadAsks() {
     const buttons = q.kind === "choice"
       ? q.choices.map((c, n) => `<button class="${n ? "" : "main"}" data-a="${esc(c)}">${esc(c)}</button>`).join("")
       : q.kind === "words"
-        ? `<input type="text" maxlength="300" placeholder="a few words" class="grow" data-words="1" data-code="${esc(q.code)}"><button class="main" data-send="1">Send</button>`
+        ? `<input type="text" maxlength="300" placeholder="${esc(wants(q.expects))}" class="grow" data-words="1" data-code="${esc(q.code)}"><button class="main" data-send="1">Send</button>`
         : `<button class="main" data-a="yes">Yes</button><button data-a="no">No</button>`;
     card.innerHTML = `<div class="title">${esc(q.text)}</div>
       <div class="muted">${esc(q.owner)} · no answer by ${esc(when(q.until))} ${silence} · ${esc(q.code)}</div>
@@ -331,6 +338,7 @@ async function loadRoutines() {
         <code>${esc(r.name)}</code><span class="pill ${r.state === "active" ? "" : "waiting"}">${esc(r.state)}</span>
         <span class="muted">${esc(r.owner)} · ${esc(r.cost)}${r.signed_by ? " · signed by " + esc(r.signed_by) : ""}</span></div>
       ${r.broken ? `<p class="err">${esc(r.broken)}</p>` : ""}
+      ${r.taken_back ? `<p class="err">Review taken back by ${esc(r.taken_back.reviewer)} (version ${esc(r.taken_back.version)}): ${esc(r.taken_back.why || "no reason given")}. Paused; a mended copy is your own.</p>` : ""}
       ${r.about ? `<p class="small">${esc(r.about)}</p>` : ""}
       <details class="t"><summary>What it touches</summary><ul class="touches">${(r.touches || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ul></details>
       <details class="i"><summary>Inputs</summary><div class="inputs"></div>
@@ -456,6 +464,12 @@ let owner = "local", original = "";
 let selected = null, last = null, checkTimer = null;
 
 function kindOf(step) { return Object.keys(KINDS).find((k) => k in step); }
+// How an ask-me step is answered, as its "I answer with" menu says it.
+function answerOf(step) {
+  if ("choices_from" in step) return "found";
+  if (step.typed === "number" || step.typed === "time") return step.typed;
+  return step.typed ? "words" : "buttons";
+}
 function refsOf(step) {
   const out = new Set();
   const walk = (v) => {
@@ -467,7 +481,8 @@ function refsOf(step) {
   };
   for (const [k, v] of Object.entries(step))
     if (!["id", "title", "after", "after_any", "only_if", "at", "optional", "choices",
-          "repeat", "until"].includes(k)) walk(v);
+          "repeat", "until", "choices_from", "typed", "between", "every"].includes(k)) walk(v);
+  if (step.choices_from) out.add(step.choices_from);
   return out;
 }
 
@@ -703,7 +718,7 @@ function side() {
   if (reading) return sideStepRead(box, step);
   const kind = kindOf(step);
   const gates = doc.steps.filter((s) => s.id !== step.id && ("check" in s || "repeat" in s ||
-                                   ("person" in s && !s.typed)));
+                                   ("person" in s && !s.typed && !s.choices_from)));
   const gate = step.only_if || "";
   let html = `<div class="row"><b>${esc(KINDS[kind])}</b><span class="grow"></span>
     <button class="link" id="s-back">the routine</button></div>
@@ -728,17 +743,25 @@ function side() {
       field("Than / for", step[test] ?? "", 'id="s-against"');
   } else if (kind === "person") {
     html += field("The question", step.person, 'data-k="person"', true) +
-      field("Choices, as buttons (two or three, commas; empty: yes or no)", (step.choices || []).join(", "), 'data-k="choices"') +
-      `<label class="f"><input type="checkbox" data-k="typed" ${step.typed ? "checked" : ""}> I answer in a few typed words instead</label>` +
+      `<label class="f">I answer with</label><select id="s-answer">${[
+        ["buttons", "Yes / No, or the choices below"], ["found", "one of the lines a step found"],
+        ["words", "a few typed words"], ["number", "a typed number"], ["time", "a typed time of day"]]
+        .map(([v, label]) => `<option value="${v}" ${v === answerOf(step) ? "selected" : ""}>${label}</option>`).join("")}</select>` +
+      (answerOf(step) === "buttons"
+        ? field("Choices, as buttons (two or three, commas; empty: yes or no)", (step.choices || []).join(", "), 'data-k="choices"') : "") +
+      (answerOf(step) === "found"
+        ? field("The step whose lines are the choices (its first three; nothing can branch on the pick)", step.choices_from || "", 'data-k="choices_from"') : "") +
+      (answerOf(step) === "number"
+        ? field("From, to (both included; empty: any number)", (step.between || []).join(", "), 'data-k="between"') : "") +
       field("Wait for an answer up to (no answer is no)", step.within || "24h", 'data-k="within"');
   } else if (kind === "repeat") {
     const stops = doc.steps.filter((s) => (step.repeat || []).includes(s.id) &&
-                                          ("check" in s || ("person" in s && !s.choices && !s.typed)));
+                                          ("check" in s || ("person" in s && !s.choices && !s.choices_from && !s.typed)));
     html += field("Steps to do again (ids, commas)", (step.repeat || []).join(", "), 'data-k="repeat"') +
       `<label class="f">Until this says yes</label><select id="s-until"><option value="">(pick a check it repeats)</option>
         ${stops.map((s) => `<option ${s.id === step.until ? "selected" : ""}>${esc(s.id)}</option>`).join("")}</select>` +
       field("At most this many times (1-20)", step.times ?? 3, 'data-k="times" data-num="1"') +
-      field("Every (5m at the least; 15m if empty)", step.every || "", 'data-k="every"');
+      field("Every (5m at the least; 15m if empty; or a wait for each pass: 15m, 30m, 1h)", [].concat(step.every || []).join(", "), 'data-k="every"');
   } else if (kind === "wait") {
     html += field("Wait for (30m, 2h)", step.wait || "", 'data-k="wait"') +
       field("…or until a time of day (07:30)", step.until || "", 'data-k="until"');
@@ -764,6 +787,13 @@ function side() {
       const old = step.id, now = el.value.trim();
       if (!now || doc.steps.some((s) => s !== step && s.id === now)) return;
       renameRefs(old, now); step.id = now; selected = now;
+    } else if (k === "every") {
+      const gaps = el.value.split(",").map((x) => x.trim()).filter(Boolean);
+      if (!gaps.length) delete step.every; else step.every = gaps.length === 1 ? gaps[0] : gaps;
+    } else if (k === "between") {
+      const two = el.value.split(",").map((x) => Number(x.trim()));
+      if (two.length === 2 && two.every((n) => !isNaN(n)) && el.value.trim()) step.between = two;
+      else delete step.between;
     } else if (["after", "after_any", "choices", "repeat"].includes(k)) {
       const ids = el.value.split(",").map((x) => x.trim()).filter(Boolean);
       if (ids.length || k === "repeat") step[k] = ids; else delete step[k];
@@ -789,6 +819,15 @@ function side() {
     };
     test.onchange = put; against.oninput = put;
   }
+  const answer = $("s-answer");
+  if (answer) answer.onchange = () => {
+    ["choices", "choices_from", "typed", "between"].forEach((k) => delete step[k]);
+    const v = answer.value;
+    if (v === "words") step.typed = true;
+    else if (v === "number" || v === "time") step.typed = v;
+    else if (v === "found") step.choices_from = "";
+    draw(); side(); check();
+  };
   $("s-gate").onchange = (e) => { if (e.target.value) step.only_if = e.target.value; else delete step.only_if; draw(); check(); };
   if ($("s-until")) $("s-until").onchange = (e) => { if (e.target.value) step.until = e.target.value; else delete step.until; check(); };
   $("s-del").onclick = () => {

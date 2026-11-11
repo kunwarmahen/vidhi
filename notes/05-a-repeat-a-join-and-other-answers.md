@@ -169,9 +169,11 @@ The second pass came five minutes after the first, from the clock in
 
 ## Not here
 
-* **A repeat whose gap grows** (15 minutes, then 30, then an hour). One
-  `every`, the same each pass.
-* **A choice from a list a step found** ("which of these three flights?").
-  Choices are written in the routine, so they can be read before it runs.
-* **Typed words that are checked** (a number, a time). They are words; a
-  `check` after them can test what they say.
+* ~~**A repeat whose gap grows** (15 minutes, then 30, then an hour).~~
+  `every = ["15m", "30m", "1h"]`, every wait written: [07](07-a-growing-wait-a-found-choice-a-checked-answer.md).
+* ~~**A choice from a list a step found** ("which of these three
+  flights?").~~ `choices_from = "flights"`; nothing can branch on it:
+  [07](07-a-growing-wait-a-found-choice-a-checked-answer.md).
+* ~~**Typed words that are checked** (a number, a time).~~ `typed =
+  "number"` (with `between`) or `"time"`; a wrong answer asks again:
+  [07](07-a-growing-wait-a-found-choice-a-checked-answer.md).

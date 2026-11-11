@@ -127,9 +127,9 @@ script, which has run on this house, but this one hasn't been run.
 
 ## Not here
 
-* **Revoking a listing.** A reviewer can't take back a signature they
-  gave; a new version can replace it, and a person can stop trusting
-  them.
+* ~~**Revoking a listing.**~~ The reviewer who signed it signs a
+  take-back; each Vidhi that trusts them pauses that exact text:
+  [08](08-a-review-taken-back.md).
 * **Ratings, downloads, comments.** The page lists; it doesn't rank.
 * **Reviewers chosen by the marketplace for you.** You trust whom you
   trust.

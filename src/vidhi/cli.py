@@ -219,6 +219,18 @@ def build_parser() -> argparse.ArgumentParser:
     q = msub.add_parser("trust", help="trust a reviewer's signatures")
     q.add_argument("name")
     q.add_argument("key", help="their public key line, or a .pub file")
+    q = msub.add_parser("revoke", help="take back your review of one version, signed "
+                                       "with your key")
+    q.add_argument("name")
+    q.add_argument("--version", required=True)
+    q.add_argument("--why", required=True)
+    q.add_argument("--from", dest="base", default="")
+    q.add_argument("--key", required=True, help="your private SSH key (~/.ssh/id_ed25519)")
+    q.add_argument("--as", dest="reviewer", required=True, metavar="REVIEWER")
+    q = msub.add_parser("check", help="reviews taken back, by reviewers you trust: "
+                                      "pause what they name")
+    q.add_argument("--from", dest="base", default="",
+                   help="one marketplace (default: every one you fetched from)")
     q = msub.add_parser("reviewer", help="(a marketplace's own) let someone approve")
     q.add_argument("name")
     q.add_argument("key", help="their public key line, or a .pub file")
@@ -322,7 +334,7 @@ def _install(args, state, store) -> int:
 
 def _list(args, state, store) -> int:
     found = store.routines(None if args.all else args.as_actor)
-    cards = [installed_card(r) for r in found]
+    cards = [installed_card(r, store) for r in found]
     if args.json_out:
         print(json.dumps(cards))
         return 0
@@ -334,6 +346,10 @@ def _list(args, state, store) -> int:
               f"-- {card.get('cost')}")
         if card.get("broken"):
             print(f"    broken: {card['broken']}")
+        if card.get("taken_back"):
+            back = card["taken_back"]
+            print(f"    review taken back by {back['reviewer']} (version {back['version']}): "
+                  f"{back['why'] or 'no reason given'}")
         if card["inputs"]:
             print("    inputs: " + ", ".join(f"{k}={v}" for k, v in card["inputs"].items()))
     return 0
@@ -499,7 +515,10 @@ def _how_to_answer(question: dict) -> str:
         return f"vidhi answer {code} " + " | ".join(
             f"{n} ({c})" for n, c in enumerate(question.get("choices") or [], 1))
     if question.get("kind") == "words":
-        return f"vidhi answer {code} your words"
+        from vidhi.runner import expected
+        typed, between = expected(question.get("expects") or "")
+        return (f"vidhi answer {code} {rt.typed_example(typed, between)}"
+                + (f"   ({rt.typed_wants(typed, between)})" if typed != "words" else ""))
     return f"vidhi answer {code} yes   (or no)"
 
 
@@ -563,7 +582,7 @@ def _serve(args, state) -> int:
         print(f"error: cannot serve on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 2
     runner.page = server.url
-    clock = Clock(runner)
+    clock = Clock(runner, take_backs=lambda: market.check(state, store, runner))
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
@@ -648,6 +667,22 @@ def _market(args, state) -> int:
             kind = "" if item.get("kind", "routine") == "routine" else " (indriya)"
             print(f"{item['name']} v{item['version']}{kind}  by {item['publisher']}, "
                   f"reviewed by {item['reviewer']}: {item['title']} -- {item.get('cost')}")
+    elif verb == "revoke":
+        said = market.revoke(args.base, args.name, args.version, args.why, Path(args.key),
+                             args.reviewer)
+        print(f"{said['name']} v{said['version']}: review {said['status']} by "
+              f"{said['reviewer']} ({said['why']}); it is no longer listed, and each Vidhi "
+              "that trusts you pauses it when it next checks")
+    elif verb == "check":
+        store = Store.at(state)
+        done, ignored = market.check(state, store, make_runner(state, store), args.base)
+        for line in done:
+            print(line)
+        for line in ignored:
+            print(f"set aside: {line}")
+        if not done:
+            print("no new reviews taken back" + ("" if market.markets_used(state) or args.base
+                                                 else " (no marketplace used yet)"))
     elif verb == "get":
         path, signer = market.get(args.base, args.name, state)
         text = path.read_text()
