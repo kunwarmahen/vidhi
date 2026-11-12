@@ -12,7 +12,9 @@ back. Vidhi imports none of them and has no dependencies of its own.
             ``tools = true``, an ordinary unattended agent turn -- here,
             or through Dvara as the person, their rules and allowance
     read    ``prahari indriya get NAME --json --as PERSON``: Prahari
-            decides what this person may read
+            decides what this person may read; a run at the computer
+            is read as Dvara's name for its owner, the name the
+            owner's own readings are kept under
     notify  Dvara's ``POST /notify``, the person's own channels
 
 THE ROAD IS THE PERSON'S. A routine installed for somebody in the house
@@ -283,8 +285,13 @@ class Roads:
         except RunnerMissing as exc:
             return Done(False, detail=str(exc))
         argv = [*command, "indriya", "get", name, "--json"]
-        if who.owner and who.owner != LOCAL:
-            argv.append(f"--as={who.owner}")
+        # Prahari counts its own Dvara name as the computer's person only
+        # when it was told that name; a run at the computer is read as that
+        # name too, or the owner's own readings are not found
+        reader = self.dvara.actor_for(who.owner) if self.dvara is not None \
+            else (who.owner if who.owner != LOCAL else "")
+        if reader and reader != LOCAL:
+            argv.append(f"--as={reader}")
         if max_age:
             argv.append(f"--max-age={max_age}")
         self.work.mkdir(parents=True, exist_ok=True)

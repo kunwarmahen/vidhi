@@ -20,7 +20,7 @@ it:
 |---|---|
 | `call` | `yantra --call`: one tool, no model (as a Prahari look) |
 | `ask` | `yantra --prompt`: the model, with no tools unless `tools = true` |
-| `read` | `prahari indriya get`: a reading Prahari keeps |
+| `read` | `prahari indriya get --as PERSON`: a reading Prahari keeps, as that person may see it (a run at the computer reads as Dvara's name for the owner, which is whose readings they are) |
 | `check` | Vidhi: a test on a value, the words a Prahari watch uses |
 | `person` | a question to the person, through Dvara: yes/no ([02](02-a-run-that-asks.md)), choices or a few words ([05](05-a-repeat-a-join-and-other-answers.md)) |
 | `wait` | Vidhi's clock |

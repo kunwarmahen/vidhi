@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-from vidhi.roads import Roads, Who, grant_for
+from vidhi.roads import Dvara, Roads, Who, grant_for
 
 FAKE = '''
 import json, sys
@@ -70,6 +70,21 @@ def test_a_reading_is_asked_for_as_the_person(tmp_path):
     done = roads.read(Who("asha"), "outside-temp", "5m")
     assert done.ok and done.text == "38.5" and done.detail == "read 4 min ago"
     assert _log(tmp_path)[0][-2:] == ["--as=asha", "--max-age=5m"]
+
+
+def test_a_reading_at_the_computer_is_asked_as_dvaras_name_for_it(tmp_path):
+    # the owner's readings are kept under Dvara's name for them ("owner"),
+    # which Prahari in Vidhi's container is not told: say it with --as
+    dvara = Dvara(url="http://dvara.example", token="t", actor="owner")
+    roads = Roads(tmp_path / "work", dvara=dvara, prahari=_fake(tmp_path))
+    assert roads.read(Who("local"), "outside-temp").ok
+    assert _log(tmp_path)[0][-1] == "--as=owner"
+
+
+def test_a_reading_at_the_computer_with_no_dvara_names_nobody(tmp_path):
+    roads = Roads(tmp_path / "work", prahari=_fake(tmp_path))
+    assert roads.read(Who("local"), "outside-temp").ok
+    assert not any(a.startswith("--as") for a in _log(tmp_path)[0])
 
 
 def test_with_no_dvara_a_message_is_kept_on_the_run(tmp_path):
