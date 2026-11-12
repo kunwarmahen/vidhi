@@ -97,7 +97,9 @@ def starts_all(store: Store, owner: str, work: Path) -> dict[str, list[dict]]:
             found.setdefault(name, []).append({
                 "by": program, "id": str(item.get("id") or ""),
                 "state": str(item.get("state") or ""), "words": words,
-                "sentence": str(item.get("sentence") or ""), "inputs": inputs})
+                "sentence": ". ".join(x for x in (str(item.get("sentence") or ""),
+                                                  str(item.get("does") or "")) if x),
+                "inputs": inputs})
     return found
 
 
