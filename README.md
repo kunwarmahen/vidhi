@@ -25,9 +25,17 @@ side at the same time, and remembers where each run got to.
   second waits for the first. Steps that don't wait on each other run at
   the same time. The page says, as you draw, what's wrong, the order it
   will run in, and in words what it touches.
+* **See what it did, and try a step.** Each box says what it gave in the
+  last run (*✓ 31*, *✓ yes*, *– skipped*). **Try this step** does one
+  step now: a reading is read and a check checks, but a question or a
+  message is only written out, never sent. Under each field, *Reads as*
+  says `{{temp}}` in words (*«The temperature now» (31)*), and a line
+  against a reading says its unit (°F).
 * **Or install a ready one.** Vidhi comes with a morning brief, a
   *price, then a plan*, and a cold-night warning. Installing one is
   filling its blanks: your city, your price line, which mail account.
+  A reading or a mail account is picked from a list of yours (Prahari's
+  readings, Setu's accounts), never typed from memory.
 * **Read it before you install it.** **Look inside** opens a ready
   routine on the same canvas, exactly as its author drew it, with
   nothing you can change. *Before you install* says where it came from
@@ -53,7 +61,10 @@ side at the same time, and remembers where each run got to.
 * **Anything can start one.** **Run now** on the page; `/routines run 1`
   in a chat; *"do my morning brief"* to your agent; a Samay schedule
   (*every day at 7:00*); a Prahari watch (*when the porch gets below
-  60*), which hands over what it saw.
+  60*), which hands over what it saw. The card's **What starts it**
+  lists them all and adds one (*at 20:00*, *when outside-temp is below
+  35*); so do Samay's and Prahari's pages and `/routines at` / `on` in
+  a chat.
 * **Your agent can run and install routines, never write one.** It
   picks one by name and fills blanks, which a small local model does
   well. Drawing the steps is yours.
