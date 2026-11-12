@@ -126,6 +126,7 @@ textarea { font: 13px/1.45 var(--mono); min-height: 70px; resize: vertical; }
 .node rect.band { stroke: none; }
 .node text { font: 13px var(--sans); fill: var(--ink); pointer-events: none; }
 .node text.k { font-size: 11px; fill: var(--ink-3); letter-spacing: .04em; }
+.node text.sub { font-size: 11px; fill: var(--ink-2); }
 .node circle.port { fill: var(--sheet); stroke: var(--ink-3); stroke-width: 1.5; cursor: crosshair; }
 .node circle.port:hover { stroke: var(--accent); fill: var(--accent-soft); }
 .node { cursor: grab; }
@@ -312,17 +313,45 @@ async function loadAsks() {
   }
 }
 
-function inputsForm(specs, values) {
+// The readings Prahari keeps that a person may use, asked once per page load
+// (a refresh of the lists asks again): a reading's blank is picked from
+// these, never typed from memory.
+const readingsAsked = {};
+function readingsFor(who) {
+  who = who || "local";
+  if (!readingsAsked[who])
+    readingsAsked[who] = api("GET", "/indriyas?owner=" + encodeURIComponent(who)).catch(() => []);
+  return readingsAsked[who];
+}
+function readingWords(r) {
+  return `${r.name}: ${r.value !== "" ? r.value : "no value yet"}${r.age ? ", " + r.age : ""}`
+    + `${r.thing ? " (" + r.thing + ")" : ""}${r.state && r.state !== "active" ? " · " + r.state : ""}`;
+}
+function readingSelect(el, current, list, blank = "pick one of your readings") {
+  const known = list.some((r) => r.name === current);
+  el.innerHTML = (current ? "" : `<option value="">${esc(blank)}</option>`)
+    + list.map((r) => `<option value="${esc(r.name)}" ${r.name === current ? "selected" : ""}>${esc(readingWords(r))}</option>`).join("")
+    + (current && !known ? `<option value="${esc(current)}" selected>${esc(current)}: not one of your Prahari readings</option>` : "");
+}
+
+function inputsForm(specs, values, who = "local") {
   const box = document.createElement("div");
   box.className = "grid2";
   for (const spec of specs || []) {
     const v = values && spec.name in values ? values[spec.name] : (spec.default ?? "");
     const wrap = document.createElement("div");
-    wrap.innerHTML = `<label class="f">${esc(spec.label || spec.name)}</label>
-      <input type="${spec.kind === "number" ? "number" : "text"}" step="any" data-name="${esc(spec.name)}" value="${esc(v)}">`;
+    if (spec.kind === "indriya") {
+      wrap.innerHTML = `<label class="f">${esc(spec.label || spec.name)}</label>
+        <select data-name="${esc(spec.name)}"><option value="${esc(v)}">${esc(v || "…")}</option></select>`;
+      const sel = wrap.querySelector("select");
+      readingsFor(who).then((list) => readingSelect(sel, String(v), list));
+    } else {
+      wrap.innerHTML = `<label class="f">${esc(spec.label || spec.name)}</label>
+        <input type="${spec.kind === "number" ? "number" : "text"}" step="any" data-name="${esc(spec.name)}" value="${esc(v)}">`;
+    }
     box.appendChild(wrap);
   }
-  box.read = () => Object.fromEntries([...box.querySelectorAll("input")]
+  box.read = () => Object.fromEntries([...box.querySelectorAll("input, select")]
     .filter((i) => i.value !== "").map((i) => [i.dataset.name, i.value]));
   return box;
 }
@@ -348,7 +377,7 @@ async function loadRoutines() {
         <button class="danger rm">Remove</button></div>`;
     keepOpen(card.querySelector("details.t"), "t:" + r.owner + r.name);
     keepOpen(card.querySelector("details.i"), "i:" + r.owner + r.name);
-    const form = inputsForm(r.inputs_spec, r.inputs);
+    const form = inputsForm(r.inputs_spec, r.inputs, r.owner);
     card.querySelector(".inputs").appendChild(form);
     const path = `/routines/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.name)}`;
     card.querySelector(".save-in").onclick = () => act(() => api("POST", path + "/inputs", { inputs: form.read() }));
@@ -449,6 +478,7 @@ async function act(fn) {
 }
 
 async function refresh(all) {
+  if (all) for (const k of Object.keys(readingsAsked)) delete readingsAsked[k];
   try {
     await Promise.all([loadStatus(), loadAsks(), loadRuns(),
                        ...(all ? [loadRoutines(), loadTemplates(), loadMarket()] : [])]);
@@ -461,7 +491,35 @@ setInterval(() => { if ($("editor").classList.contains("hidden")) refresh(false)
 const W = 176, H = 60, SVGNS = "http://www.w3.org/2000/svg";
 let doc = null;          // the routine being drawn, in TOML's own keys
 let owner = "local", original = "";
+let filled = {};       // an installed routine's kept inputs: what its blanks hold now
 let selected = null, last = null, checkTimer = null;
+
+// What a read step reads: a reading by name, or a blank ({{inputs.NAME}})
+// and what that blank holds now (kept on the installed routine, else its
+// default).
+function readTarget(step) {
+  const m = /^\{\{\s*inputs\.([\w-]+)\s*\}\}$/.exec(String(step.read || "").trim());
+  if (!m) return { name: String(step.read || "").trim() };
+  const spec = (doc.inputs || {})[m[1]];
+  const now = m[1] in filled ? filled[m[1]] : spec && "default" in spec ? spec.default : "";
+  return { blank: m[1], spec, name: String(now ?? "") };
+}
+async function explainRead(step, el) {
+  const t = readTarget(step);
+  const list = await readingsFor(owner);
+  const found = list.find((r) => r.name === t.name);
+  const said = found ? `<b>${esc(found.name)}</b>: ${esc(found.value !== "" ? found.value : "no value yet")}${found.age ? ", " + esc(found.age) : ""}${found.thing ? ` (${esc(found.thing)})` : ""}` : "";
+  const missing = t.name && !found
+    ? ` <span class="err">${esc(t.name)} is not one of your Prahari readings, so this step will fail. ${list.length ? "Pick one of yours." : "Prahari has no readings for you yet: make one on Prahari's page."}</span>` : "";
+  if (t.blank) {
+    const label = t.spec ? t.spec.label || t.blank : t.blank;
+    el.innerHTML = `<code>{{inputs.${esc(t.blank)}}}</code> is a blank, <i>${esc(label)}</i>, filled when the routine is installed or run (its card's Inputs, or Run now). `
+      + (t.spec ? "" : `<span class="err">No input called ${esc(t.blank)}: add it under the routine's Inputs.</span> `)
+      + (t.name ? (found ? `It holds ${said} now.` : `It holds ${esc(t.name)} now.`) : "Nothing is filled in yet.") + missing;
+  } else if (t.name) {
+    el.innerHTML = found ? `Reads ${said} from Prahari, every run.` : missing;
+  } else el.innerHTML = `Pick the reading this step uses.`;
+}
 
 function kindOf(step) { return Object.keys(KINDS).find((k) => k in step); }
 // How an ask-me step is answered, as its "I answer with" menu says it.
@@ -491,7 +549,7 @@ let reading = null;
 async function openViewer(name) {
   reading = await api("GET", `/templates/${encodeURIComponent(name)}`);
   doc = JSON.parse(JSON.stringify(reading.routine));
-  owner = "local"; original = ""; selected = null;
+  owner = "local"; original = ""; selected = null; filled = {};
   $("editor").classList.add("reading");
   $("editor").classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -504,6 +562,7 @@ function openEditor(r) {
   $("editor").classList.remove("reading");
   owner = r ? r.owner : "local";
   original = r ? r.name : "";
+  filled = r && r.inputs ? { ...r.inputs } : {};
   doc = r ? JSON.parse(JSON.stringify(r.steps ? fromCard(r) : r)) : {
     name: "my-routine", title: "My routine", version: "1",
     steps: [{ id: "hello", title: "Say hello", notify: "Hello from Vidhi, {{run.date}}", at: [60, 80] }] };
@@ -653,7 +712,13 @@ function draw() {
     const t = svgEl("text", { x: 16, y: 40 }, g);
     const label = step.title || step.id;
     t.textContent = label.length > 21 ? label.slice(0, 20) + "…" : label;
-    svgEl("title", {}, g).textContent = `${step.id}: ${label}`;
+    if (kind === "read") {
+      const tg = readTarget(step);
+      const sub = svgEl("text", { x: 16, y: 54, class: "sub" }, g);
+      const words = tg.name || (tg.blank ? "blank: " + tg.blank : "?");
+      sub.textContent = words.length > 24 ? words.slice(0, 23) + "…" : words;
+    }
+    svgEl("title", {}, g).textContent = `${step.id}: ${label}` + (kind === "read" ? ` (reads ${readTarget(step).name || "nothing yet"})` : "");
     const port = svgEl("circle", { class: "port", cx: W, cy: H / 2, r: 7 }, g);
     port.appendChild(svgEl("title", {})).textContent = "Drag to a step that should wait for this one";
     g.addEventListener("pointerdown", (ev) => startDrag(ev, step, ev.target === port));
@@ -732,7 +797,9 @@ function side() {
     html += field("What to ask (use {{step}} for an earlier result)", step.ask, 'data-k="ask"', true) +
       `<label class="f"><input type="checkbox" data-k="tools" ${step.tools ? "checked" : ""}> as my agent, with its tools (asks as my rules say)</label>`;
   } else if (kind === "read") {
-    html += field("Reading's name (an indriya)", step.read, 'data-k="read"') +
+    html += `<label class="f">Reading</label><select id="s-read"><option>…</option></select>
+      <div class="small" id="s-read-said" style="margin-top:6px"></div>` +
+      field("Exactly (a reading's name, or {{inputs.NAME}} for a blank)", step.read, 'data-k="read"') +
       field("Read again if older than (5m, 1h; empty: as kept)", step.max_age || "", 'data-k="max_age"');
   } else if (kind === "check") {
     const tests = ["below", "above", "at_most", "at_least", "equals", "contains", "lacks", "matches"];
@@ -780,6 +847,26 @@ function side() {
     <div class="buttons"><button class="danger" id="s-del">Delete this step</button></div>`;
   box.innerHTML = html;
   $("s-back").onclick = () => { selected = null; draw(); side(); };
+  if (kind === "read") {
+    const sel = $("s-read"), said = $("s-read-said"), exact = box.querySelector('[data-k="read"]');
+    const blanks = Object.entries(doc.inputs || {}).filter(([n, spec]) => spec.kind === "indriya"
+      || String(step.read || "").includes("inputs." + n));
+    readingsFor(owner).then((list) => {
+      const cur = String(step.read || "").trim();
+      const opts = [
+        ...blanks.map(([n, spec]) => [`{{inputs.${n}}}`, `Asked for: ${spec.label || n}`]),
+        ...list.map((r) => [r.name, readingWords(r)])];
+      sel.innerHTML = (opts.some(([v]) => v === cur) ? "" : `<option value="${esc(cur)}" selected>${esc(cur || "pick one")}</option>`)
+        + (blanks.length ? `<optgroup label="Filled when it's installed or run">${opts.slice(0, blanks.length).map(([v, l]) =>
+            `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</optgroup>` : "")
+        + `<optgroup label="${list.length ? "Your readings in Prahari" : "Prahari has no readings for you yet"}">${opts.slice(blanks.length).map(([v, l]) =>
+            `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</optgroup>`;
+    });
+    explainRead(step, said);
+    sel.onchange = () => { if (!sel.value) return; step.read = sel.value; exact.value = sel.value;
+                           explainRead(step, said); draw(); check(); };
+    exact.addEventListener("input", () => explainRead(step, said));
+  }
   box.querySelectorAll("[data-k]").forEach((el) => el.addEventListener("input", () => {
     const k = el.dataset.k;
     if (el.type === "checkbox") { if (el.checked) step[k] = true; else delete step[k]; }
@@ -873,6 +960,7 @@ function sideRoutine(box) {
       <input type="text" data-p="label" value="${esc(spec.label || "")}" placeholder="what to ask" aria-label="label">
       <input type="text" data-p="default" value="${esc(spec.default ?? "")}" placeholder="default" aria-label="default">
     </div><hr style="border:none;border-top:1px dashed var(--line)">`).join("")}</div>
+    <datalist id="dl-readings"></datalist>
     <div class="buttons"><button id="r-add-in">+ input</button></div>
     ${field("Accounts it needs (Setu names, commas)", ((doc.needs || {}).setu || []).join(", "), 'data-r="setu"')}
     <p class="muted">Click a step to change it. Drag a step's right dot onto another step to make that one wait for it. Steps that don't wait on each other run side by side.</p>`;
@@ -902,6 +990,14 @@ function sideRoutine(box) {
     check();
   };
   box.querySelectorAll("#r-inputs input, #r-inputs select").forEach((el) => el.addEventListener("input", readInputs));
+  // an indriya blank's default is offered from your own readings
+  readingsFor(owner).then((list) => { $("dl-readings").innerHTML = list.map((r) =>
+    `<option value="${esc(r.name)}">${esc(readingWords(r))}</option>`).join(""); });
+  const listFor = (row) => { const d = row.querySelector('[data-p="default"]');
+    if (row.querySelector('[data-p="kind"]').value === "indriya") d.setAttribute("list", "dl-readings");
+    else d.removeAttribute("list"); };
+  box.querySelectorAll("#r-inputs [data-i]").forEach((row) => { listFor(row);
+    row.querySelector('[data-p="kind"]').addEventListener("change", () => listFor(row)); });
   $("r-add-in").onclick = () => { doc.inputs = { ...(doc.inputs || {}), ["input" + (inputs.length + 1)]: { kind: "text" } }; side(); check(); };
 }
 
@@ -913,7 +1009,9 @@ function sideStepRead(box, step) {
       <pre class="mono" style="white-space:pre-wrap;word-break:break-word;margin:0;background:var(--sunk);padding:8px;border-radius:6px">${esc(typeof v === "string" ? v : JSON.stringify(v, null, 1))}</pre>`);
   box.innerHTML = `<div class="row"><b>${esc(step.title || step.id)}</b><span class="grow"></span>
     <button class="link" id="s-back">before you install</button></div>
-    <div class="muted">${esc(KINDS[kind])} · id <code>${esc(step.id)}</code></div>${rows.join("")}`;
+    <div class="muted">${esc(KINDS[kind])} · id <code>${esc(step.id)}</code></div>
+    ${kind === "read" ? `<div class="small" id="s-read-said" style="margin-top:6px"></div>` : ""}${rows.join("")}`;
+  if (kind === "read") explainRead(step, $("s-read-said"));
   $("s-back").onclick = () => { selected = null; draw(); side(); };
 }
 function sideBefore(box) {

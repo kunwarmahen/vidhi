@@ -10,7 +10,7 @@ author = "vidhi"
 
 [inputs.reading]
 kind = "indriya"
-label = "The reading to use (an indriya's name)"
+label = "Which reading (one Prahari keeps)"
 default = "outside-temp"
 
 [inputs.line]

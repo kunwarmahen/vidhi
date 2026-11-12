@@ -14,7 +14,9 @@ back. Vidhi imports none of them and has no dependencies of its own.
     read    ``prahari indriya get NAME --json --as PERSON``: Prahari
             decides what this person may read; a run at the computer
             is read as Dvara's name for its owner, the name the
-            owner's own readings are kept under
+            owner's own readings are kept under. ``readings`` lists
+            them (``prahari indriya list``), for the page to offer by
+            name instead of a blank to type into
     notify  Dvara's ``POST /notify``, the person's own channels
 
 THE ROAD IS THE PERSON'S. A routine installed for somebody in the house
@@ -279,19 +281,43 @@ class Roads:
 
     # -- a reading Prahari keeps ----------------------------------------------------
 
+    def _reader(self, owner: str) -> list[str]:
+        """``--as`` for Prahari. It counts its own Dvara name as the
+        computer's person only when it was told that name; a run at the
+        computer is read as that name too, or the owner's own readings
+        are not found."""
+        reader = self.dvara.actor_for(owner) if self.dvara is not None \
+            else (owner if owner != LOCAL else "")
+        return [f"--as={reader}"] if reader and reader != LOCAL else []
+
+    def readings(self, owner: str) -> list[dict]:
+        """The readings this person may use, for a page to offer by name:
+        each one's name, what it reads, its value and age. Empty when
+        Prahari is not here or says nothing."""
+        try:
+            command = self.prahari or find("prahari", "VIDHI_PRAHARI")
+        except RunnerMissing:
+            return []
+        self.work.mkdir(parents=True, exist_ok=True)
+        out, _err, timed_out = _run([*command, "indriya", "list", "--json",
+                                     *self._reader(owner)], cwd=self.work, limit=30)
+        try:
+            cards = json.loads(out.strip().splitlines()[-1]) if out.strip() and not timed_out \
+                else []
+        except json.JSONDecodeError:
+            cards = []
+        return [{"name": str(c.get("name") or ""), "thing": str(c.get("thing") or ""),
+                 "value": "" if c.get("value") is None else str(c.get("value")),
+                 "age": str(c.get("age") or ""), "state": str(c.get("state") or "")}
+                for c in cards if isinstance(c, dict) and c.get("name")] \
+            if isinstance(cards, list) else []
+
     def read(self, who: Who, name: str, max_age: str = "") -> Done:
         try:
             command = self.prahari or find("prahari", "VIDHI_PRAHARI")
         except RunnerMissing as exc:
             return Done(False, detail=str(exc))
-        argv = [*command, "indriya", "get", name, "--json"]
-        # Prahari counts its own Dvara name as the computer's person only
-        # when it was told that name; a run at the computer is read as that
-        # name too, or the owner's own readings are not found
-        reader = self.dvara.actor_for(who.owner) if self.dvara is not None \
-            else (who.owner if who.owner != LOCAL else "")
-        if reader and reader != LOCAL:
-            argv.append(f"--as={reader}")
+        argv = [*command, "indriya", "get", name, "--json", *self._reader(who.owner)]
         if max_age:
             argv.append(f"--max-age={max_age}")
         self.work.mkdir(parents=True, exist_ok=True)

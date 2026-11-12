@@ -25,6 +25,10 @@ if "--call" in argv:
 elif "--prompt" in argv:
     print(json.dumps({"format": "yantra.run.v1", "ok": True, "text": "  written  ",
                       "cost_usd": 0.002}))
+elif argv[:2] == ["indriya", "list"]:
+    print(json.dumps([{"name": "outside-temp", "thing": "the outside temperature",
+                       "value": 58.5, "age": "4 min ago", "state": "active"},
+                      {"name": "porch", "value": None}]))
 elif argv[:2] == ["indriya", "get"]:
     print(json.dumps({"name": argv[2], "value": 38.5, "age": "4 min ago"}))
 '''
@@ -85,6 +89,21 @@ def test_a_reading_at_the_computer_with_no_dvara_names_nobody(tmp_path):
     roads = Roads(tmp_path / "work", prahari=_fake(tmp_path))
     assert roads.read(Who("local"), "outside-temp").ok
     assert not any(a.startswith("--as") for a in _log(tmp_path)[0])
+
+
+def test_the_readings_offered_are_the_owners_own(tmp_path):
+    dvara = Dvara(url="http://dvara.example", token="t", actor="owner")
+    roads = Roads(tmp_path / "work", dvara=dvara, prahari=_fake(tmp_path))
+    found = roads.readings("local")
+    assert [r["name"] for r in found] == ["outside-temp", "porch"]
+    assert found[0]["value"] == "58.5" and found[1]["value"] == ""
+    assert _log(tmp_path)[0] == ["indriya", "list", "--json", "--as=owner"]
+
+
+def test_with_no_prahari_no_readings_are_offered(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDHI_PRAHARI", str(tmp_path / "nothing-here"))
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert Roads(tmp_path / "work").readings("local") == []
 
 
 def test_with_no_dvara_a_message_is_kept_on_the_run(tmp_path):

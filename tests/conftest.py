@@ -26,6 +26,11 @@ class FakeRoads:
         self.started: dict[str, float] = {}
         self._lock = threading.Lock()
         self.dvara = None
+        self.kept_readings: list[dict] = []
+
+    def readings(self, owner: str) -> list[dict]:
+        self.calls.append(("readings", owner))
+        return self.kept_readings
 
     def _log(self, key, *rest):
         with self._lock:

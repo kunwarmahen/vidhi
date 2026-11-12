@@ -23,6 +23,9 @@ served by ``vidhi serve``.
     POST   /api/runs/ID/stop
     GET    /api/questions                      what runs are waiting to hear
     POST   /api/questions/CODE   {answer}      yes or no, a choice, or a few words
+    GET    /api/indriyas?owner=                the readings Prahari keeps that this
+                                               person may use: a reading's blank is
+                                               picked from these, not typed
     GET    /api/market                         what the marketplace (VIDHI_MARKET) lists
     POST   /api/market/get       {name}        fetch one, its signature checked
                                                against the reviewers trusted here
@@ -120,6 +123,9 @@ class Api:
     def _route(self, method, parts, query, body) -> tuple[int, dict | list]:
         if parts == ["status"] and method == "GET":
             return 200, report(self.state, self.store)
+        if parts == ["indriyas"] and method == "GET":
+            owner = (query.get("owner") or [LOCAL])[0].strip() or LOCAL
+            return 200, self.runner.roads.readings(owner)
         if parts == ["check"] and method == "POST":
             return 200, check(self._text(body))
         if parts == ["templates"]:

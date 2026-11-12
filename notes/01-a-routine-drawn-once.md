@@ -81,6 +81,18 @@ which reads the routine as Vidhi will and answers with what's wrong, or
 the order it will run in (*1. weather + mail + news → 2. brief → 3.
 send*) and what it touches. Saving is the same check, kept.
 
+**A READING IS PICKED, NEVER TYPED FROM MEMORY.** A `read` step usually
+reads a blank (`read = "{{inputs.reading}}"`), so one routine works for
+anyone's sensor. Left at that, the box says nothing about where the
+number comes from. So the page asks Prahari which readings this person
+may use (`GET /api/indriyas`, Prahari's `indriya list`) and offers them.
+An `indriya` blank is a drop-down of them, value and age beside each name,
+wherever it is filled (install, Inputs, Run now). The read step's box
+names the reading under its title. Its panel says in words what the blank
+is and what it holds now (*It holds outside-temp: 58.4, 41 min ago*), and
+picks the blank or any reading directly. A name that isn't one of yours
+is said in red before a run fails on it.
+
 **THE CANVAS SENDS ITS OWN SHAPE; THE SERVER WRITES THE TOML.** A routine
 drawn and a routine typed are kept, checked and signed the same way.
 **TOML** shows the file, and a file pasted there is drawn.
@@ -123,6 +135,13 @@ pick now finds the JSON after a tool's first line, as Prahari's does.
 On the canvas, a new routine got a `call` step, a line dragged from it
 onto the `notify` step, **Arrange**, **Save**, and the saved TOML had
 `after = ["fetch"]` on the notify step and an `at` on each.
+
+The Cold night warning sample, installed on a scratch page against the
+house's own Prahari: its card's *Which reading* was a drop-down holding
+*outside-temp: 58.4, 41 min ago (the outside temperature in °F)*. The
+canvas box read *outside-temp* under *The temperature now*, and its
+panel said the blank holds it now. **Run now** read 58.4, said *58.4 is
+not below 35*, and skipped asking.
 
 ## Not here
 

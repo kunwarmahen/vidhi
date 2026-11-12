@@ -56,6 +56,16 @@ def test_the_page_installs_runs_and_shows_a_run(page, store, roads):
     assert status == 202 and run["state"] == "queued" and run["started_by"] == "page"
 
 
+def test_a_readings_blank_is_offered_the_persons_own_readings(page, roads):
+    roads.kept_readings = [{"name": "outside-temp", "value": "58.5", "age": "1 min ago",
+                            "thing": "", "state": "active"}]
+    status, found = _call(page, "GET", "/api/indriyas?owner=asha")
+    assert status == 200 and found[0]["name"] == "outside-temp"
+    assert _call(page, "GET", "/api/indriyas")[0] == 200
+    assert [c for c in roads.calls if c[0] == "readings"] == [("readings", "asha"),
+                                                             ("readings", "local")]
+
+
 def test_installing_the_same_name_again_is_refused_without_replace(page):
     _call(page, "POST", "/api/routines", {"toml": HELLO})
     status, said = _call(page, "POST", "/api/routines", {"toml": HELLO})

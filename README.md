@@ -166,7 +166,8 @@ the run goes on).
 `{{temp}}` is what the step `temp` gave; `{{temp.current.temperature_2m}}`
 a field of its JSON. `{{inputs.line}}` is an input, filled when the
 routine was installed (kinds: text, number, time, yesno, account,
-channel, indriya). `{{run.date}}`, `{{run.time}}` and `{{run.person}}` are
+channel, indriya; an indriya blank is picked on the page from the
+person's own readings, its value beside each). `{{run.date}}`, `{{run.time}}` and `{{run.person}}` are
 the run's own.
 
 **The rules a routine is held to**, each against a way it goes wrong
