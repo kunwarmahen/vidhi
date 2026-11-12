@@ -128,6 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p.add_argument("pairs", nargs="+", metavar="NAME=VALUE")
     who(p)
+    js(p)
     p = sub.add_parser("starts", help="what starts a routine (Samay schedules, Prahari "
                                       "watches); or make or remove one")
     p.add_argument("name", nargs="?", default="",
@@ -425,6 +426,9 @@ def _save(args, state, store) -> int:
 
 def _set_inputs(args, state, store) -> int:
     changed = routines.set_inputs(store, args.as_actor, args.name, _inputs(args.pairs))
+    if args.json_out:
+        print(json.dumps({"name": changed.name, "inputs": changed.inputs}))
+        return 0
     print(f"{changed.name}: " + ", ".join(f"{k}={v}" for k, v in changed.inputs.items()))
     return 0
 
