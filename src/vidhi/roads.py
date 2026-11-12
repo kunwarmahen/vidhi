@@ -312,6 +312,29 @@ class Roads:
                 for c in cards if isinstance(c, dict) and c.get("name")] \
             if isinstance(cards, list) else []
 
+    def accounts(self, owner: str, service: str = "") -> list[dict]:
+        """This computer's Setu connections, for an account blank to offer:
+        each one's account name (what a step is given), its service and
+        whose it is. Only the computer's own person's: someone else in the
+        house keeps theirs in their own Setu, which this Vidhi can't see."""
+        if owner != LOCAL and not (self.dvara is not None and owner == self.dvara.actor):
+            return []
+        try:
+            command = find("setu", "VIDHI_SETU")
+        except RunnerMissing:
+            return []
+        self.work.mkdir(parents=True, exist_ok=True)
+        out, _err, timed_out = _run([*command, "status", "--json"], cwd=self.work, limit=30)
+        try:
+            data = json.loads(out) if out.strip() and not timed_out else {}
+        except json.JSONDecodeError:
+            data = {}
+        found = data.get("connections") if isinstance(data, dict) else None
+        return [{"account": str(c.get("account") or ""), "service": str(c.get("connector") or ""),
+                 "who": str(c.get("email") or ""), "level": str(c.get("level_label") or "")}
+                for c in found or [] if isinstance(c, dict) and c.get("account")
+                and (not service or c.get("connector") == service)]
+
     def read(self, who: Who, name: str, max_age: str = "") -> Done:
         try:
             command = self.prahari or find("prahari", "VIDHI_PRAHARI")
@@ -329,7 +352,15 @@ class Roads:
         except json.JSONDecodeError:
             card = None
         if not isinstance(card, dict):
-            return Done(False, detail=_tail(err) or _tail(out) or "prahari said nothing")
+            said = _tail(err) or _tail(out) or "prahari said nothing"
+            if "no indriya" in said:
+                # say which ones there are, so the fix is a pick, not a hunt
+                yours = [r["name"] for r in self.readings(who.owner)]
+                said = (f"there is no reading {name!r}; "
+                        + (f"yours are: {', '.join(yours)}. Pick one under the routine's "
+                           "Inputs" if yours else "Prahari has no readings for you yet: "
+                           "make one on Prahari's page"))
+            return Done(False, detail=said)
         if card.get("value") in (None, ""):
             return Done(False, detail=f"the reading {name} has no value yet"
                         + (f" ({card.get('last_error')})" if card.get("last_error") else ""))

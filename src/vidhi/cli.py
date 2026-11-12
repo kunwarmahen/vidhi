@@ -37,7 +37,7 @@ import threading
 import time
 from pathlib import Path
 
-from vidhi import catalog, market, routines
+from vidhi import catalog, market, routines, starters
 from vidhi import routine as rt
 from vidhi.clock import Clock
 from vidhi.roads import Dvara, Roads
@@ -128,6 +128,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p.add_argument("pairs", nargs="+", metavar="NAME=VALUE")
     who(p)
+    p = sub.add_parser("starts", help="what starts a routine (Samay schedules, Prahari "
+                                      "watches); or make or remove one")
+    p.add_argument("name", nargs="?", default="",
+                   help="the routine (leave out: every routine's)")
+    p.add_argument("--at", default="", metavar="WHEN",
+                   help="make a Samay schedule that starts it: 'at 20:00', "
+                        "'at 07:30 on mon-fri'")
+    p.add_argument("--on", default="", metavar="READING",
+                   help="make a Prahari watch on this reading that starts it "
+                        "(with --when)")
+    p.add_argument("--when", default="", metavar="TEST",
+                   help="with --on: 'below 35', 'above 80'")
+    p.add_argument("--input", action="append", default=[], metavar="NAME=VALUE",
+                   help="the starter's own value for one of the routine's blanks")
+    p.add_argument("--rm", default="", metavar="BY:ID",
+                   help="remove one of its starters: samay:3e02c5cd, prahari:43dff0b2")
+    who(p)
+    js(p)
     for name, text in (("run", "start one now, and follow it"),
                        ("start", "queue a run and say its id (for a trigger)")):
         p = sub.add_parser(name, help=text)
@@ -268,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{place['id']}  {place['path']}  ({place['what']})")
             return 0
         store = Store.at(state)
+        if getattr(args, "as_actor", None):
+            args.as_actor = routines.person(store, args.as_actor)
         return COMMANDS[args.command](args, state, store)
     except (rt.RoutineError, RunError, market.MarketError) as exc:
         if getattr(args, "json_out", False):
@@ -406,6 +426,51 @@ def _save(args, state, store) -> int:
 def _set_inputs(args, state, store) -> int:
     changed = routines.set_inputs(store, args.as_actor, args.name, _inputs(args.pairs))
     print(f"{changed.name}: " + ", ".join(f"{k}={v}" for k, v in changed.inputs.items()))
+    return 0
+
+
+def _starts(args, state, store) -> int:
+    work = state / "work"
+    try:
+        if args.at or args.on or args.rm:
+            if not args.name:
+                raise starters.StarterError("name the routine")
+            if args.rm:
+                by, _, ident = args.rm.partition(":")
+                starters.remove(store, args.as_actor, args.name, by, ident, work)
+                said = {"removed": ident}
+            elif args.at:
+                made = starters.add_schedule(store, args.as_actor, args.name, args.at, work,
+                                             _inputs(args.input))
+                said = {"made": made.get("id"), "by": "samay",
+                        "sentence": made.get("sentence", "")}
+            else:
+                made = starters.add_watch(store, args.as_actor, args.name, args.on,
+                                          args.when, work, _inputs(args.input))
+                said = {"made": made.get("id"), "by": "prahari",
+                        "sentence": made.get("sentence", "")}
+            if args.json_out:
+                print(json.dumps(said))
+            else:
+                print(f"removed {said['removed']}" if "removed" in said
+                      else f"made {said['by']} {said['made']}: {said['sentence']}")
+            return 0
+    except starters.StarterError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    found = starters.starts_all(store, args.as_actor, work)
+    if args.name:
+        routines.find(store, args.as_actor, args.name)
+        found = {args.name: found.get(args.name, [])}
+    if args.json_out:
+        print(json.dumps(found))
+        return 0
+    for name, items in found.items():
+        print(f"{name}:")
+        for item in items or []:
+            print(f"  {item['by']}:{item['id']}  {item['state']}  {item['words']}")
+        if not items:
+            print("  only when asked (a chat, the page, vidhi run)")
     return 0
 
 
@@ -560,7 +625,7 @@ def _routine_state(args, state, store) -> int:
 
 COMMANDS = {"status": _status, "templates": _templates, "install": _install,
             "list": _list, "show": _show, "check": _check, "save": _save,
-            "inputs": _set_inputs, "run": _start, "start": _start, "runs": _runs,
+            "inputs": _set_inputs, "starts": _starts, "run": _start, "start": _start, "runs": _runs,
             "steps": _steps, "questions": _questions, "answer": _answer, "stop": _stop,
             "pause": _routine_state, "resume": _routine_state, "rm": _routine_state}
 
@@ -594,7 +659,8 @@ def _serve(args, state) -> int:
     (state / "serve.json").write_text(json.dumps(
         {"pid": os.getpid(), "url": server.url,
          "market": (server.url + "market/") if shop else None,
-         "dvara": runner.roads.dvara.url if runner.roads.dvara else None}))
+         "dvara": runner.roads.dvara.url if runner.roads.dvara else None,
+         "owner_as": runner.roads.dvara.actor if runner.roads.dvara else ""}))
     print(f"vidhi serving routines from {state}")
     print(f"page: {server.page_url}", flush=True)
     if shop:

@@ -84,5 +84,10 @@ call the brief makes, its cost, and the inputs it would run with
   to each run over the installed ones. Whether the routine has that
   blank is Vidhi's to say when the run starts: a schedule with a blank
   it doesn't have fails, in Vidhi's words.
+* ~~**A starter made from the routine.**~~ Its card's *What starts it*
+  lists and makes Samay schedules and Prahari watches, and `vidhi starts`
+  does it from the terminal ([09](09-what-starts-it-and-a-step-tried.md)).
+* ~~**The owner's chat and the page's routines.**~~ Dvara's name for the
+  owner is read as `local` ([09](09-what-starts-it-and-a-step-tried.md)).
 * **A trigger that waits for the run.** Starting returns at once; what
   the routine finds is the routine's to say.

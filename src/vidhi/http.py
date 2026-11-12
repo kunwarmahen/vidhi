@@ -10,7 +10,14 @@ served by ``vidhi serve``.
     POST   /api/routines/OWNER/NAME/inputs     {inputs}
     POST   /api/routines/OWNER/NAME/run        {inputs}: queued, 202 at once
     POST   /api/routines/OWNER/NAME/pause | /resume
+    GET    /api/routines/OWNER/NAME/starts     the schedules and watches that start it
+                                               (asked of Samay and Prahari: starters.py)
+    POST   /api/routines/OWNER/NAME/starts     {by: samay, when, inputs} or {by: prahari,
+                                               reading, test, inputs}: make one
+    DELETE /api/routines/OWNER/NAME/starts/BY/ID   remove one of its own
     DELETE /api/routines/OWNER/NAME
+    POST   /api/try           {toml | routine, step, owner, inputs, results}: one step
+                              done now, nothing kept or sent (runner.try_step)
     POST   /api/check         {toml | routine}: read and checked, nothing kept (the canvas
                               asks on every change: what's wrong, the waves, the
                               words of what it touches)
@@ -26,6 +33,10 @@ served by ``vidhi serve``.
     GET    /api/indriyas?owner=                the readings Prahari keeps that this
                                                person may use: a reading's blank is
                                                picked from these, not typed
+    GET    /api/pages                          where Samay's and Prahari's pages are (a
+                                               reading or a schedule made there)
+    GET    /api/accounts?owner=&service=       this computer's Setu connections, for an
+                                               account blank to offer
     GET    /api/market                         what the marketplace (VIDHI_MARKET) lists
     POST   /api/market/get       {name}        fetch one, its signature checked
                                                against the reviewers trusted here
@@ -63,7 +74,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from vidhi import catalog, market, routines
+from vidhi import catalog, market, routines, starters
 from vidhi import routine as rt
 from vidhi.runner import RunError, Runner, describe, installed_card
 from vidhi.status import report
@@ -115,7 +126,8 @@ class Api:
         parts = [p for p in path.split("/") if p][1:]
         try:
             return self._route(method, parts, query, body)
-        except (rt.RoutineError, RunError, market.MarketError) as exc:
+        except (rt.RoutineError, RunError, market.MarketError,
+                starters.StarterError) as exc:
             message = str(exc)
             raise ApiError(404 if " has no " in message or message.startswith("no ")
                            else 400, message) from None
@@ -126,6 +138,16 @@ class Api:
         if parts == ["indriyas"] and method == "GET":
             owner = (query.get("owner") or [LOCAL])[0].strip() or LOCAL
             return 200, self.runner.roads.readings(owner)
+        if parts == ["pages"] and method == "GET":
+            return 200, starters.pages(self.state / "work")
+        if parts == ["accounts"] and method == "GET":
+            owner = (query.get("owner") or [LOCAL])[0].strip() or LOCAL
+            return 200, self.runner.roads.accounts(
+                routines.person(self.store, owner), (query.get("service") or [""])[0].strip())
+        if parts == ["try"] and method == "POST":
+            owner = str(body.get("owner") or LOCAL)
+            return 200, self.runner.try_step(owner, self._text(body), str(body.get("step") or ""),
+                                             body.get("inputs") or {}, body.get("results") or {})
         if parts == ["check"] and method == "POST":
             return 200, check(self._text(body))
         if parts == ["templates"]:
@@ -230,6 +252,27 @@ class Api:
         if method == "POST" and verb in ("pause", "resume"):
             changed = getattr(routines, verb)(self.store, owner, name)
             return 200, installed_card(changed)
+        if rest and rest[0] == "starts":
+            work = self.state / "work"
+            if method == "GET" and len(rest) == 1:
+                return 200, starters.starts(self.store, owner, name, work)
+            if method == "POST" and len(rest) == 1:
+                by = str(body.get("by") or "")
+                if by == "samay":
+                    made = starters.add_schedule(self.store, owner, name,
+                                                 str(body.get("when") or ""), work,
+                                                 body.get("inputs") or {})
+                elif by == "prahari":
+                    made = starters.add_watch(self.store, owner, name,
+                                              str(body.get("reading") or ""),
+                                              str(body.get("test") or ""), work,
+                                              body.get("inputs") or {})
+                else:
+                    raise ApiError(400, "by is samay (a time) or prahari (a reading)")
+                return 201, {"made": made.get("id"), "sentence": made.get("sentence", "")}
+            if method == "DELETE" and len(rest) == 3:
+                starters.remove(self.store, owner, name, rest[1], rest[2], work)
+                return 200, {"removed": rest[2]}
         raise ApiError(404, "not found")
 
 

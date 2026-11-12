@@ -15,6 +15,13 @@ here, so the rules hold however a routine arrives:
 * A MEND KEEPS ITS NAME. The canvas saves the routine it opened; a
   changed ``name`` would be a new routine, so it is refused there.
 * A CAP PER PERSON: ``MAX_ROUTINES``.
+* THE OWNER HAS ONE NAME HERE. What is installed at the computer is
+  ``local``'s; the owner's agent through Dvara asks as Dvara's name for
+  them (``owner``). Both are the same person, so that name is read as
+  ``local`` (``person``): the owner's chat sees the routines installed on
+  the page, and a schedule or a watch it made starts them. The name is
+  ``$VIDHI_DVARA_ACTOR``, or what ``vidhi serve`` wrote in ``serve.json``,
+  which every container mounting the folder reads.
 * A REVIEW TAKEN BACK HOLDS EVERYWHERE. A text whose reviewer took their
   review back (market.py's take-backs, kept by its sha256) is refused
   here however it arrives -- a file, a template, the page, a chat -- and
@@ -25,12 +32,34 @@ here, so the rules hold however a routine arrives:
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from typing import Any
 
 from vidhi import routine as rt
 from vidhi.store import Installed, Store
 
 MAX_ROUTINES = 50
+LOCAL = "local"
+
+
+def owner_alias(store: Store) -> str:
+    """Dvara's name for the computer's owner, or ""."""
+    named = os.environ.get("VIDHI_DVARA_ACTOR", "").strip()
+    if named:
+        return named
+    try:
+        kept = json.loads((store.path.parent / "serve.json").read_text())
+    except (OSError, ValueError):
+        return ""
+    return str(kept.get("owner_as") or "").strip() if isinstance(kept, dict) else ""
+
+
+def person(store: Store, owner: str) -> str:
+    """``local`` for Dvara's name for the owner; anyone else as given."""
+    owner = str(owner or "").strip() or LOCAL
+    alias = owner_alias(store)
+    return LOCAL if alias and owner == alias and alias != LOCAL else owner
 RUNNERS = ("direct", "dvara")
 
 

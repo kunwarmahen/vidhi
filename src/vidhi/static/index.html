@@ -127,6 +127,15 @@ textarea { font: 13px/1.45 var(--mono); min-height: 70px; resize: vertical; }
 .node text { font: 13px var(--sans); fill: var(--ink); pointer-events: none; }
 .node text.k { font-size: 11px; fill: var(--ink-3); letter-spacing: .04em; }
 .node text.sub { font-size: 11px; fill: var(--ink-2); }
+.node text.got { font-size: 11px; fill: var(--ink-2); }
+.node text.got.ok { fill: var(--ok); } .node text.got.bad { fill: var(--bad); }
+.node text.got.quiet { fill: var(--quiet); } .node text.got.tried { fill: var(--accent); }
+.words { font-size: 12px; color: var(--ink-2); margin-top: 3px; }
+.tried { margin-top: 8px; padding: 8px 10px; border-radius: 7px; background: var(--sunk); font-size: 13px; }
+.tried pre { white-space: pre-wrap; word-break: break-word; margin: 4px 0 0; font: 12px/1.45 var(--mono);
+             max-height: 180px; overflow: auto; }
+ul.starters { list-style: none; padding: 0; margin: 6px 0; }
+ul.starters li { padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
 .node circle.port { fill: var(--sheet); stroke: var(--ink-3); stroke-width: 1.5; cursor: crosshair; }
 .node circle.port:hover { stroke: var(--accent); fill: var(--accent-soft); }
 .node { cursor: grab; }
@@ -323,6 +332,30 @@ function readingsFor(who) {
     readingsAsked[who] = api("GET", "/indriyas?owner=" + encodeURIComponent(who)).catch(() => []);
   return readingsAsked[who];
 }
+const askedOnce = {};
+function once(key, path, empty) {
+  if (!askedOnce[key]) askedOnce[key] = api("GET", path).catch(() => empty);
+  return askedOnce[key];
+}
+function accountsFor(who, service) {
+  return once(`a:${who}:${service || ""}`, `/accounts?owner=${encodeURIComponent(who || "local")}`
+    + `&service=${encodeURIComponent(service || "")}`, []);
+}
+const pagesAt = () => once("pages", "/pages", {});
+// A unit said in a reading's words: "the outside temperature in °F" -> °F
+function unitOf(thing) {
+  const m = /°\s?[FC]\b|%|kWh|mph|\bUSD\b|\$/.exec(thing || "");
+  return m ? m[0].replace(/\s/g, "") : "";
+}
+const NEW_READING = "__new_reading__";
+// "+ make a new reading" opens Prahari's page and puts the choice back
+function newReadingPicked(sel) {
+  if (sel.value !== NEW_READING) { sel.dataset.prev = sel.value; return false; }
+  pagesAt().then((p) => window.open(p.prahari || "about:blank", "_blank"));
+  sel.value = sel.dataset.prev || "";
+  return true;
+}
+
 function readingWords(r) {
   return `${r.name}: ${r.value !== "" ? r.value : "no value yet"}${r.age ? ", " + r.age : ""}`
     + `${r.thing ? " (" + r.thing + ")" : ""}${r.state && r.state !== "active" ? " · " + r.state : ""}`;
@@ -331,10 +364,12 @@ function readingSelect(el, current, list, blank = "pick one of your readings") {
   const known = list.some((r) => r.name === current);
   el.innerHTML = (current ? "" : `<option value="">${esc(blank)}</option>`)
     + list.map((r) => `<option value="${esc(r.name)}" ${r.name === current ? "selected" : ""}>${esc(readingWords(r))}</option>`).join("")
-    + (current && !known ? `<option value="${esc(current)}" selected>${esc(current)}: not one of your Prahari readings</option>` : "");
+    + (current && !known ? `<option value="${esc(current)}" selected>${esc(current)}: not one of your Prahari readings</option>` : "")
+    + `<option value="${NEW_READING}">+ Make a new reading on Prahari's page…</option>`;
+  el.dataset.prev = current;
 }
 
-function inputsForm(specs, values, who = "local") {
+function inputsForm(specs, values, who = "local", steps = null) {
   const box = document.createElement("div");
   box.className = "grid2";
   for (const spec of specs || []) {
@@ -344,7 +379,20 @@ function inputsForm(specs, values, who = "local") {
       wrap.innerHTML = `<label class="f">${esc(spec.label || spec.name)}</label>
         <select data-name="${esc(spec.name)}"><option value="${esc(v)}">${esc(v || "…")}</option></select>`;
       const sel = wrap.querySelector("select");
-      readingsFor(who).then((list) => readingSelect(sel, String(v), list));
+      readingsFor(who).then((list) => { readingSelect(sel, String(v), list); box.units(); });
+      sel.addEventListener("change", () => { newReadingPicked(sel); box.units(); });
+    } else if (spec.kind === "account") {
+      wrap.innerHTML = `<label class="f">${esc(spec.label || spec.name)}</label>
+        <input type="text" data-name="${esc(spec.name)}" value="${esc(v)}">`;
+      accountsFor(who, spec.service).then((list) => {
+        if (!list.length) return;     // someone else's Setu, or none here: typed
+        const sel = document.createElement("select");
+        sel.dataset.name = spec.name;
+        const known = list.some((a) => a.account === String(v));
+        sel.innerHTML = (v && !known ? `<option value="${esc(v)}" selected>${esc(v)}: not one of your Setu accounts${spec.service ? " for " + esc(spec.service) : ""}</option>` : "")
+          + list.map((a) => `<option value="${esc(a.account)}" ${a.account === String(v) ? "selected" : ""}>${esc(a.account)} (${esc(a.service)}: ${esc(a.who)})</option>`).join("");
+        wrap.querySelector("input").replaceWith(sel);
+      });
     } else {
       wrap.innerHTML = `<label class="f">${esc(spec.label || spec.name)}</label>
         <input type="${spec.kind === "number" ? "number" : "text"}" step="any" data-name="${esc(spec.name)}" value="${esc(v)}">`;
@@ -352,8 +400,101 @@ function inputsForm(specs, values, who = "local") {
     box.appendChild(wrap);
   }
   box.read = () => Object.fromEntries([...box.querySelectorAll("input, select")]
-    .filter((i) => i.value !== "").map((i) => [i.dataset.name, i.value]));
+    .filter((i) => i.value !== "" && i.value !== NEW_READING).map((i) => [i.dataset.name, i.value]));
+  // a number checked against a reading says the reading's unit: "Cold means below (°F)"
+  box.units = async () => {
+    if (!steps) return;
+    const list = await readingsFor(who);
+    const now = box.read();
+    for (const spec of specs || []) {
+      if (spec.kind !== "number") continue;
+      const unit = unitFor(steps, spec.name, now, list, specs);
+      const label = box.querySelector(`[data-name="${CSS.escape(spec.name)}"]`)?.parentElement.querySelector("label");
+      if (label) label.textContent = (spec.label || spec.name) + (unit ? ` (${unit})` : "");
+    }
+  };
+  box.units();
   return box;
+}
+// The reading a read step reads, by its blank's value or its own name.
+function readName(step, values, specs) {
+  const m = /^\{\{\s*inputs\.([\w-]+)\s*\}\}$/.exec(String(step.read || "").trim());
+  if (!m) return String(step.read || "").trim();
+  if (m[1] in values) return String(values[m[1]]);
+  const spec = (specs || []).find((x) => x.name === m[1]);
+  return spec && "default" in spec ? String(spec.default) : "";
+}
+// The unit of the reading a check compares {{inputs.NAME}} with, if any.
+function unitFor(steps, name, values, list, specs) {
+  for (const s of steps) {
+    if (!("check" in s)) continue;
+    const against = ["below", "above", "at_most", "at_least", "equals"].map((t) => s[t]).find((x) => x !== undefined);
+    if (!String(against ?? "").includes("inputs." + name)) continue;
+    const m = /\{\{\s*([\w-]+)/.exec(String(s.check || ""));
+    const src = m && steps.find((x) => x.id === m[1] && "read" in x);
+    if (!src) continue;
+    const r = list.find((x) => x.name === readName(src, values, specs));
+    if (r) return unitOf(r.thing);
+  }
+  return "";
+}
+
+// What starts a routine: Samay's schedules and Prahari's watches, asked of
+// them; one made here is an ordinary schedule or watch, on their pages too.
+function guessWatch(r, values) {
+  for (const s of r.steps || []) {
+    if (!("check" in s)) continue;
+    const test = ["below", "above"].find((t) => t in s);
+    const m = /\{\{\s*([\w-]+)/.exec(String(s.check || ""));
+    const src = m && (r.steps || []).find((x) => x.id === m[1] && "read" in x);
+    if (!test || !src) continue;
+    const raw = String(s[test]);
+    const n = /^\{\{\s*inputs\.([\w-]+)\s*\}\}$/.exec(raw);
+    const spec = n && (r.inputs_spec || []).find((x) => x.name === n[1]);
+    return { reading: readName(src, values, r.inputs_spec), test,
+             n: n ? (n[1] in values ? values[n[1]] : spec && spec.default) : raw };
+  }
+  return { reading: "", test: "below", n: "" };
+}
+async function drawStarts(box, r, form) {
+  box.innerHTML = `<p class="muted">Asking Samay and Prahari…</p>`;
+  const path = `/routines/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.name)}/starts`;
+  let list;
+  try { list = await api("GET", path); }
+  catch (e) { box.innerHTML = `<p class="err small">${esc(e.message)}</p>`; return; }
+  const guess = guessWatch(r, form.read());
+  box.innerHTML = (list.length
+      ? `<ul class="starters">${list.map((x, i) => `<li><b>${esc(x.words)}</b>
+          <span class="pill ${x.state === "active" ? "done" : "skipped"}">${esc(x.state)}</span>
+          <button class="link danger" data-i="${i}">Remove</button>
+          <div class="small">${esc(x.sentence)}</div></li>`).join("")}</ul>`
+      : `<p class="small">Nothing starts it by itself yet: it runs when you press Run now, or ask for it in a chat.</p>`)
+    + `<label class="f">At a time (a Samay schedule)</label>
+       <div class="row"><input type="text" class="at" placeholder="at 20:00, or at 07:30 on mon-fri" style="flex:1">
+         <button class="add-at">Add</button></div>
+       <label class="f">When a reading crosses a line (a Prahari watch: no model, decided on each reading)</label>
+       <div class="row"><select class="on" style="flex:2"><option>…</option></select>
+         <select class="test" style="flex:1"><option ${guess.test === "below" ? "selected" : ""}>below</option><option ${guess.test === "above" ? "selected" : ""}>above</option></select>
+         <input type="number" step="any" class="n" value="${esc(guess.n ?? "")}" style="flex:1">
+         <button class="add-on">Add</button></div>
+       <p class="muted">Each one also shows on Samay's or Prahari's page, where it can be changed or paused like any other.</p>`;
+  const on = box.querySelector(".on");
+  readingsFor(r.owner).then((rs) => readingSelect(on, guess.reading, rs));
+  on.addEventListener("change", () => newReadingPicked(on));
+  const after = async (fn) => {
+    try { await fn(); } catch (e) { alert(e.message); return; }
+    drawStarts(box, r, form);
+  };
+  box.querySelectorAll("button[data-i]").forEach((b) => b.onclick = () => {
+    const x = list[Number(b.dataset.i)];
+    if (confirm(`Remove ${x.words}? It stops starting ${r.name}.`))
+      after(() => api("DELETE", `${path}/${x.by}/${encodeURIComponent(x.id)}`));
+  });
+  box.querySelector(".add-at").onclick = () => after(() => api("POST", path,
+    { by: "samay", when: box.querySelector(".at").value.trim() }));
+  box.querySelector(".add-on").onclick = () => after(() => api("POST", path,
+    { by: "prahari", reading: on.value === NEW_READING ? "" : on.value,
+      test: `${box.querySelector(".test").value} ${box.querySelector(".n").value}`.trim() }));
 }
 
 async function loadRoutines() {
@@ -372,13 +513,19 @@ async function loadRoutines() {
       <details class="t"><summary>What it touches</summary><ul class="touches">${(r.touches || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ul></details>
       <details class="i"><summary>Inputs</summary><div class="inputs"></div>
         <div class="buttons"><button class="save-in">Keep these</button></div></details>
+      <details class="st"><summary>What starts it</summary><div class="starts-box"></div></details>
       <div class="buttons"><button class="main run">Run now</button><button class="edit">Draw</button>
         <button class="toggle">${r.state === "active" ? "Pause" : "Resume"}</button>
         <button class="danger rm">Remove</button></div>`;
     keepOpen(card.querySelector("details.t"), "t:" + r.owner + r.name);
     keepOpen(card.querySelector("details.i"), "i:" + r.owner + r.name);
-    const form = inputsForm(r.inputs_spec, r.inputs, r.owner);
+    const form = inputsForm(r.inputs_spec, r.inputs, r.owner, r.steps);
     card.querySelector(".inputs").appendChild(form);
+    const st = card.querySelector("details.st");
+    keepOpen(st, "s:" + r.owner + r.name);
+    const showStarts = () => drawStarts(st.querySelector(".starts-box"), r, form);
+    st.addEventListener("toggle", () => { if (st.open) showStarts(); });
+    if (st.open) showStarts();
     const path = `/routines/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.name)}`;
     card.querySelector(".save-in").onclick = () => act(() => api("POST", path + "/inputs", { inputs: form.read() }));
     card.querySelector(".run").onclick = () => act(() => api("POST", path + "/run", { inputs: form.read() }));
@@ -478,7 +625,10 @@ async function act(fn) {
 }
 
 async function refresh(all) {
-  if (all) for (const k of Object.keys(readingsAsked)) delete readingsAsked[k];
+  if (all) {
+    for (const k of Object.keys(readingsAsked)) delete readingsAsked[k];
+    for (const k of Object.keys(askedOnce)) if (k !== "pages") delete askedOnce[k];
+  }
   try {
     await Promise.all([loadStatus(), loadAsks(), loadRuns(),
                        ...(all ? [loadRoutines(), loadTemplates(), loadMarket()] : [])]);
@@ -488,10 +638,12 @@ refresh(true);
 setInterval(() => { if ($("editor").classList.contains("hidden")) refresh(false); }, 5000);
 
 // -- the canvas ------------------------------------------------------------------------
-const W = 176, H = 60, SVGNS = "http://www.w3.org/2000/svg";
+const W = 176, H = 76, SVGNS = "http://www.w3.org/2000/svg";
 let doc = null;          // the routine being drawn, in TOML's own keys
 let owner = "local", original = "";
 let filled = {};       // an installed routine's kept inputs: what its blanks hold now
+let lastRun = null;    // its newest run: {when, state, steps: {id: row}}
+let tried = {};        // steps tried here a moment ago: {id: what the try gave}
 let selected = null, last = null, checkTimer = null;
 
 // What a read step reads: a reading by name, or a blank ({{inputs.NAME}})
@@ -510,7 +662,7 @@ async function explainRead(step, el) {
   const found = list.find((r) => r.name === t.name);
   const said = found ? `<b>${esc(found.name)}</b>: ${esc(found.value !== "" ? found.value : "no value yet")}${found.age ? ", " + esc(found.age) : ""}${found.thing ? ` (${esc(found.thing)})` : ""}` : "";
   const missing = t.name && !found
-    ? ` <span class="err">${esc(t.name)} is not one of your Prahari readings, so this step will fail. ${list.length ? "Pick one of yours." : "Prahari has no readings for you yet: make one on Prahari's page."}</span>` : "";
+    ? ` <span class="err">${esc(t.name)} is not one of your Prahari readings, so this step will fail. ${list.length ? "Pick one of yours, or make it on Prahari's page." : "Prahari has no readings for you yet: make one on Prahari's page."}</span>` : "";
   if (t.blank) {
     const label = t.spec ? t.spec.label || t.blank : t.blank;
     el.innerHTML = `<code>{{inputs.${esc(t.blank)}}}</code> is a blank, <i>${esc(label)}</i>, filled when the routine is installed or run (its card's Inputs, or Run now). `
@@ -549,7 +701,7 @@ let reading = null;
 async function openViewer(name) {
   reading = await api("GET", `/templates/${encodeURIComponent(name)}`);
   doc = JSON.parse(JSON.stringify(reading.routine));
-  owner = "local"; original = ""; selected = null; filled = {};
+  owner = "local"; original = ""; selected = null; filled = {}; lastRun = null; tried = {};
   $("editor").classList.add("reading");
   $("editor").classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -563,6 +715,14 @@ function openEditor(r) {
   owner = r ? r.owner : "local";
   original = r ? r.name : "";
   filled = r && r.inputs ? { ...r.inputs } : {};
+  lastRun = null; tried = {};
+  if (r) api("GET", `/runs?owner=${encodeURIComponent(r.owner)}&routine=${encodeURIComponent(r.name)}&limit=1`)
+    .then((runs) => {
+      if (!runs.length || doc.name !== r.name) return;
+      lastRun = { when: runs[0].created_at, state: runs[0].state,
+                  steps: Object.fromEntries(runs[0].steps.map((x) => [x.step_id, x])) };
+      draw(); if (!selected) side();
+    }).catch(() => {});
   doc = r ? JSON.parse(JSON.stringify(r.steps ? fromCard(r) : r)) : {
     name: "my-routine", title: "My routine", version: "1",
     steps: [{ id: "hello", title: "Say hello", notify: "Hello from Vidhi, {{run.date}}", at: [60, 80] }] };
@@ -707,24 +867,101 @@ function draw() {
                           transform: `translate(${x},${y})`, tabindex: 0 }, svg);
     svgEl("rect", { class: "box", width: W, height: H, rx: 9 }, g);
     svgEl("rect", { class: "band", width: 6, height: H, rx: 3, style: `fill: var(--k-${kind})` }, g);
-    const k = svgEl("text", { x: 16, y: 20, class: "k" }, g);
+    const k = svgEl("text", { x: 16, y: 18, class: "k" }, g);
     k.textContent = (SHORT[kind] || "?").toUpperCase() + (step.optional ? " · optional" : "");
-    const t = svgEl("text", { x: 16, y: 40 }, g);
+    const t = svgEl("text", { x: 16, y: 37 }, g);
     const label = step.title || step.id;
     t.textContent = label.length > 21 ? label.slice(0, 20) + "…" : label;
     if (kind === "read") {
       const tg = readTarget(step);
-      const sub = svgEl("text", { x: 16, y: 54, class: "sub" }, g);
+      const sub = svgEl("text", { x: 16, y: 53, class: "sub" }, g);
       const words = tg.name || (tg.blank ? "blank: " + tg.blank : "?");
       sub.textContent = words.length > 24 ? words.slice(0, 23) + "…" : words;
     }
-    svgEl("title", {}, g).textContent = `${step.id}: ${label}` + (kind === "read" ? ` (reads ${readTarget(step).name || "nothing yet"})` : "");
+    const got = gotWords(step.id);
+    if (got) {
+      const line = svgEl("text", { x: 16, y: 69, class: "got " + got.cls }, g);
+      line.textContent = got.text.length > 25 ? got.text.slice(0, 24) + "…" : got.text;
+    }
+    svgEl("title", {}, g).textContent = `${step.id}: ${label}` + (kind === "read" ? ` (reads ${readTarget(step).name || "nothing yet"})` : "")
+      + (got ? `\n${got.long}` : "");
     const port = svgEl("circle", { class: "port", cx: W, cy: H / 2, r: 7 }, g);
     port.appendChild(svgEl("title", {})).textContent = "Drag to a step that should wait for this one";
     g.addEventListener("pointerdown", (ev) => startDrag(ev, step, ev.target === port));
     g.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { selected = step.id; draw(); side(); } });
   }
   svg.setAttribute("width", maxX); svg.setAttribute("height", maxY);
+}
+
+// What a step gave: tried here just now, else its last run.
+function gotWords(id) {
+  const t = tried[id];
+  if (t) return { cls: "tried", text: "tried: " + (t.ok ? (t.text || t.said || "ok") : "failed"),
+                  long: `tried just now: ${t.ok ? t.text : "failed"} ${t.said || ""}`.trim() };
+  const row = lastRun && lastRun.steps[id];
+  if (!row || row.state === "pending") return null;
+  const one = (x) => String(x || "").split("\n")[0];
+  const at = `last run ${when(lastRun.when)}`;
+  if (row.state === "done") return { cls: "ok", text: "✓ " + (one(row.result) || "done"),
+                                     long: `${at}: ${one(row.result)} ${row.why || ""}`.trim() };
+  if (row.state === "failed") return { cls: "bad", text: "✗ failed", long: `${at}: failed: ${row.detail || row.why}` };
+  if (row.state === "skipped") return { cls: "quiet", text: "– skipped", long: `${at}: skipped: ${row.why || ""}` };
+  return { cls: "quiet", text: "… " + row.state, long: `${at}: ${row.state} ${row.why || ""}` };
+}
+
+// {{temp}} said as the step it is: «The temperature now» (58.4)
+function inWords(text) {
+  return esc(String(text ?? "")).replace(/\{\{\s*([\w-]+)(?:\.([\w.-]+))?\s*\}\}/g, (m, root, rest) => {
+    if (root === "inputs") {
+      const spec = (doc.inputs || {})[rest];
+      const v = rest in filled ? filled[rest] : spec && "default" in spec ? spec.default : "";
+      return `<b>«${esc(spec ? spec.label || rest : rest)}»</b>${v !== "" && v !== undefined ? ` (${esc(v)})` : ""}`;
+    }
+    if (root === "run") return `<b>«the run's ${esc(rest || "")}»</b>`;
+    if (root === "any") return `<b>«whichever one ran»</b>`;
+    const s = doc.steps.find((x) => x.id === root);
+    const t = tried[root], row = lastRun && lastRun.steps[root];
+    const got = t && t.ok ? t.text : row && row.state === "done" ? row.result : "";
+    return `<b>«${esc(s ? s.title || s.id : root)}${rest && rest !== "value" ? " → " + esc(rest) : ""}»</b>`
+      + (got ? ` (${esc(String(got).split("\n")[0].slice(0, 40))})` : "");
+  });
+}
+// Under every field with a {{…}} in it, the same words in plain language.
+function sayFields(box) {
+  box.querySelectorAll("input[data-k], textarea[data-k], #s-against").forEach((el) => {
+    if (["id", "title", "after", "after_any", "every", "between", "choices", "repeat", "max_age"].includes(el.dataset.k)) return;
+    const said = document.createElement("div");
+    said.className = "words";
+    el.after(said);
+    const put = () => { said.innerHTML = /\{\{/.test(el.value) ? "Reads as: " + inWords(el.value) : ""; };
+    put();
+    el.addEventListener("input", put);
+  });
+}
+// The step's own Try: done now, nothing kept or sent.
+function tryBox(step) {
+  return `<div class="buttons"><button id="s-try" title="Reads and checks for real; a question or a message is only written out, never sent">Try this step</button>
+    <span class="muted" style="align-self:center">sends nothing, changes nothing</span></div><div id="s-tried"></div>`;
+}
+function wireTry(step) {
+  const b = $("s-try");
+  if (!b) return;
+  const show = (out) => {
+    const miss = (out.missing || []).filter((m) => !tried[m]);
+    $("s-tried").innerHTML = `<div class="tried"><b class="${out.ok ? "okc" : "err"}">${out.ok ? (out.sent === false && ["person", "notify"].includes(out.kind) ? "Would say" : "Gave") : "Failed"}</b>
+      ${out.text ? `<pre>${esc(out.text)}</pre>` : ""}${out.said ? `<div class="small">${esc(out.said)}</div>` : ""}
+      ${miss.length ? `<div class="small">Uses ${miss.map((m) => `«${esc((doc.steps.find((x) => x.id === m) || {}).title || m)}»`).join(", ")}: ${out.from_run ? "what it gave in the last run" : "nothing yet; try that one first"}.</div>` : ""}</div>`;
+  };
+  if (tried[step.id]) show(tried[step.id]);
+  b.onclick = async () => {
+    b.disabled = true; $("s-tried").innerHTML = `<div class="tried muted">Trying…</div>`;
+    const results = Object.fromEntries(Object.entries(tried).filter(([, t]) => t.ok).map(([k, t]) => [k, t.text]));
+    try {
+      const out = await api("POST", "/try", { routine: doc, step: step.id, owner, inputs: filled, results });
+      tried[step.id] = out; show(out); draw();
+    } catch (e) { $("s-tried").innerHTML = `<div class="tried err">${esc(e.message)}</div>`; }
+    b.disabled = false;
+  };
 }
 
 function svgPoint(ev) {
@@ -788,7 +1025,8 @@ function side() {
   let html = `<div class="row"><b>${esc(KINDS[kind])}</b><span class="grow"></span>
     <button class="link" id="s-back">the routine</button></div>
     ${field("Id (other steps use its result as {{" + step.id + "}})", step.id, 'data-k="id"')}
-    ${field("Title", step.title || "", 'data-k="title"')}`;
+    ${field("Title", step.title || "", 'data-k="title"')}
+    ${tryBox(step)}`;
   if (kind === "call") {
     html += field("Tool (its exact name)", step.call, 'data-k="call"') +
       field("Arguments (JSON)", JSON.stringify(step.args || {}, null, 1), 'data-k="args" data-json="1"', true) +
@@ -847,6 +1085,18 @@ function side() {
     <div class="buttons"><button class="danger" id="s-del">Delete this step</button></div>`;
   box.innerHTML = html;
   $("s-back").onclick = () => { selected = null; draw(); side(); };
+  wireTry(step);
+  sayFields(box);
+  if (kind === "check") {
+    // the reading's unit beside the line: "Than / for … (°F)"
+    const m = /\{\{\s*([\w-]+)/.exec(String(step.check || ""));
+    const src = m && doc.steps.find((x) => x.id === m[1] && "read" in x);
+    if (src) readingsFor(owner).then((list) => {
+      const r = list.find((x) => x.name === readTarget(src).name);
+      const unit = r ? unitOf(r.thing) : "";
+      if (unit) $("s-against").insertAdjacentHTML("afterend", `<div class="words">in ${esc(unit)}, the unit of ${esc(r.name)}</div>`);
+    });
+  }
   if (kind === "read") {
     const sel = $("s-read"), said = $("s-read-said"), exact = box.querySelector('[data-k="read"]');
     const blanks = Object.entries(doc.inputs || {}).filter(([n, spec]) => spec.kind === "indriya"
@@ -860,10 +1110,12 @@ function side() {
         + (blanks.length ? `<optgroup label="Filled when it's installed or run">${opts.slice(0, blanks.length).map(([v, l]) =>
             `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</optgroup>` : "")
         + `<optgroup label="${list.length ? "Your readings in Prahari" : "Prahari has no readings for you yet"}">${opts.slice(blanks.length).map(([v, l]) =>
-            `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</optgroup>`;
+            `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</optgroup>`
+        + `<option value="${NEW_READING}">+ Make a new reading on Prahari's page…</option>`;
+      sel.dataset.prev = cur;
     });
     explainRead(step, said);
-    sel.onchange = () => { if (!sel.value) return; step.read = sel.value; exact.value = sel.value;
+    sel.onchange = () => { if (!sel.value || newReadingPicked(sel)) return; step.read = sel.value; exact.value = sel.value;
                            explainRead(step, said); draw(); check(); };
     exact.addEventListener("input", () => explainRead(step, said));
   }
@@ -963,6 +1215,7 @@ function sideRoutine(box) {
     <datalist id="dl-readings"></datalist>
     <div class="buttons"><button id="r-add-in">+ input</button></div>
     ${field("Accounts it needs (Setu names, commas)", ((doc.needs || {}).setu || []).join(", "), 'data-r="setu"')}
+    ${lastRun ? `<p class="small">Each box shows what it gave in the last run (${esc(when(lastRun.when))}, ${esc(lastRun.state)}); <b>Try this step</b> on a step shows what it gives now.</p>` : `<p class="small">Click a step, then <b>Try this step</b>, to see what it gives now.</p>`}
     <p class="muted">Click a step to change it. Drag a step's right dot onto another step to make that one wait for it. Steps that don't wait on each other run side by side.</p>`;
   box.querySelectorAll("[data-r]").forEach((el) => el.addEventListener("input", () => {
     const k = el.dataset.r;
@@ -1010,8 +1263,9 @@ function sideStepRead(box, step) {
   box.innerHTML = `<div class="row"><b>${esc(step.title || step.id)}</b><span class="grow"></span>
     <button class="link" id="s-back">before you install</button></div>
     <div class="muted">${esc(KINDS[kind])} · id <code>${esc(step.id)}</code></div>
-    ${kind === "read" ? `<div class="small" id="s-read-said" style="margin-top:6px"></div>` : ""}${rows.join("")}`;
+    ${kind === "read" ? `<div class="small" id="s-read-said" style="margin-top:6px"></div>` : ""}${tryBox(step)}${rows.join("")}`;
   if (kind === "read") explainRead(step, $("s-read-said"));
+  wireTry(step);
   $("s-back").onclick = () => { selected = null; draw(); side(); };
 }
 function sideBefore(box) {

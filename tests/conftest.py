@@ -28,6 +28,11 @@ class FakeRoads:
         self.dvara = None
         self.kept_readings: list[dict] = []
 
+    def accounts(self, owner: str, service: str = "") -> list[dict]:
+        self.calls.append(("accounts", owner, service))
+        return [{"account": "personal", "service": "gmail", "who": "a@example.com",
+                 "level": "Read only"}]
+
     def readings(self, owner: str) -> list[dict]:
         self.calls.append(("readings", owner))
         return self.kept_readings
@@ -86,3 +91,12 @@ def roads() -> FakeRoads:
 @pytest.fixture
 def runner(store: Store, roads: FakeRoads) -> Runner:
     return Runner(store, roads)
+
+
+@pytest.fixture(autouse=True)
+def no_real_house(monkeypatch, tmp_path):
+    """Never the house's Samay, Prahari or Dvara name: a test that wants
+    one sets its own stand-in."""
+    for program in ("SAMAY", "PRAHARI", "SETU"):
+        monkeypatch.setenv(f"VIDHI_{program}", str(tmp_path / f"no-{program.lower()}"))
+    monkeypatch.delenv("VIDHI_DVARA_ACTOR", raising=False)

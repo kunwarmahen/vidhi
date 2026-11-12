@@ -217,12 +217,17 @@ person it was put to. [notes/02](notes/02-a-run-that-asks.md).
 
 | From | How |
 |---|---|
-| Vidhi's page | **Run now** on its card, with this run's inputs |
+| Vidhi's page | **Run now** on its card, with this run's inputs; its **What starts it** lists every schedule and watch that starts it, and makes one: *at 20:00*, or *when outside-temp is below 35* ([notes/09](notes/09-what-starts-it-and-a-step-tried.md)) |
 | a chat (Dvara) | `/routines` lists them; `/routines run 1` starts one; `/routines 1` says how it went |
 | your agent | *"do my morning brief"*: `run_routine`, after your yes on a card that lists everything it touches |
 | Samay | a schedule with `--runner vidhi` and the routine's name as its prompt (`samay add morning-brief --runner vidhi --when "at 07:00"`), or `routine` on the agent's `create_schedule`; `--input city=Cary` (or `routine_inputs`) gives that schedule its own values |
 | Prahari | a watch with `--routine NAME` (or `routine` on `create_watch`): when it fires, the routine starts with what it saw as `{{inputs.found}}`; `--input room=porch` (or `routine_inputs`) gives that watch its own values |
 | a program | `vidhi start NAME --as PERSON --by WHO` only adds the run; `vidhi serve` runs it |
+| the terminal | `vidhi starts NAME` lists what starts it; `--at WHEN` makes a Samay schedule, `--on READING --when "below 35"` a Prahari watch, `--rm samay:ID` removes one of its own |
+
+Dvara's name for the owner (`owner`) is read as `local`, the computer's
+person: the owner's chat sees and runs the routines installed on the
+page, and a schedule or watch filed under `owner` starts them.
 
 Starting is only adding a row to Vidhi's state folder. Samay's, Prahari's
 and Dvara's containers all mount that folder, so a trigger needs no
@@ -308,12 +313,17 @@ src/vidhi/
   store.py     one SQLite file: routines, runs, steps, questions, and
                reviews taken back (notes/08)
   runner.py    a run worked forward, side by side; stopping to ask,
-               picked up again; one worker per run (notes/02)
+               picked up again; one worker per run (notes/02); one step
+               tried alone, nothing sent (notes/09)
   roads.py     who does each step: yantra, Dvara as the person, prahari
   clock.py     what `vidhi serve` keeps: queued runs started, waits woken
                (notes/03); take-backs read every six hours (notes/08)
   routines.py  installing, mending, pausing: one place for every door;
-               a taken-back text refused on all of them (notes/08)
+               a taken-back text refused on all of them (notes/08); the
+               owner's one name (notes/09)
+  starters.py  what starts a routine: Samay's schedules and Prahari's
+               watches, listed, made and removed with their own commands
+               (notes/09)
   catalog.py   templates: yours, a marketplace's, Vidhi's own
   market.py    publish, review, sign, fetch, check (notes/04); indriya
                templates, reviewers, the public page (notes/06);
@@ -330,6 +340,6 @@ deploy/
   public-market-tailscale.sh   the marketplace alone, behind Tailscale Funnel
 ```
 
-`uv run pytest` runs the tests (147); `uv run ruff check src tests` the
+`uv run pytest` runs the tests (166); `uv run ruff check src tests` the
 lint. No dependencies: the standard library, plus OpenSSH's `ssh-keygen`
 for signatures.

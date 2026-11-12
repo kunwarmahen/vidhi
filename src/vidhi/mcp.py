@@ -6,7 +6,8 @@ An MCP server on stdin/stdout -- newline-delimited JSON-RPC, by hand,
 like Prahari's and Samay's -- with seven tools:
 
     list_routines       read    this person's routines: what each does, in
-                                words, its inputs, its last run
+                                words, its blanks, what starts it (a Samay
+                                schedule, a Prahari watch), its last run
     list_templates      read    routines ready to install, with their blanks
     routine_runs        read    how the last runs went, step by step, and any
                                 question waiting for the person
@@ -41,7 +42,7 @@ import sys
 from pathlib import Path
 from typing import Any, TextIO
 
-from vidhi import __version__, catalog, market, routines
+from vidhi import __version__, catalog, market, routines, starters
 from vidhi import routine as rt
 from vidhi.runner import RunError, Runner, describe, installed_card
 from vidhi.status import serving
@@ -62,7 +63,11 @@ TOOLS = [
     {"name": "list_routines", "annotations": READ,
      "description": ("This person's routines (steps they set up once: a morning brief, "
                      "a price check that asks before acting): what each does in words, "
-                     "its inputs, and how its last run went. Read this before running one."),
+                     "its blanks (inputs, and of what kind), what starts it (a Samay "
+                     "schedule, a Prahari watch), and how its last run went. Read this "
+                     "before running one. To start one at a time, give Samay's schedule "
+                     "tool its routine; to start one when a reading crosses a line, give "
+                     "Prahari's watch tool its routine and the reading to sense."),
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "list_templates", "annotations": READ,
      "description": ("Routines ready to install, each with the blanks it needs filled "
@@ -109,7 +114,7 @@ class Tools:
         self.store = store
         self.runner = runner
         self.state = Path(state)
-        self.person = person
+        self.person = routines.person(store, person)
         self.agent = agent
         self.road = road
 
@@ -131,6 +136,7 @@ class Tools:
             return ("No routines yet. list_templates shows ready ones; a new kind is drawn "
                     "on Vidhi's page by the person.")
         out = []
+        started = starters.starts_all(self.store, self.person, self.state / "work")
         for n, installed in enumerate(mine, start=1):
             card = installed_card(installed)
             last = self.store.runs(owner=self.person, routine=installed.name, limit=1)
@@ -138,6 +144,12 @@ class Tools:
                         "about": card.get("about"), "state": installed.state,
                         "inputs": installed.inputs, "cost": card.get("cost"),
                         "touches": card.get("touches"),
+                        "blanks": [{"name": i["name"], "kind": i.get("kind", "text"),
+                                    "label": i.get("label", "")}
+                                   for i in card.get("inputs_spec") or []],
+                        "started_by": [f"{x['words']} ({x['state']})"
+                                       for x in started.get(installed.name, [])]
+                                      or ["only when asked (a chat, the page, run_routine)"],
                         "last_run": ({"state": last[0].state, "at": last[0].created_at,
                                       "detail": last[0].detail} if last else None)})
         return json.dumps(out, indent=1)

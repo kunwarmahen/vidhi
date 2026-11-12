@@ -93,6 +93,9 @@ is and what it holds now (*It holds outside-temp: 58.4, 41 min ago*), and
 picks the blank or any reading directly. A name that isn't one of yours
 is said in red before a run fails on it.
 
+Each box also says what it gave in the last run, and any step can be
+tried alone, sending nothing ([09](09-what-starts-it-and-a-step-tried.md)).
+
 **THE CANVAS SENDS ITS OWN SHAPE; THE SERVER WRITES THE TOML.** A routine
 drawn and a routine typed are kept, checked and signed the same way.
 **TOML** shows the file, and a file pasted there is drawn.
