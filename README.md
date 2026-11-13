@@ -313,6 +313,9 @@ you add it, they publish it where people can compare it):
   questions, and where it runs. `VIDHI_PRAHARI`: the Prahari for
   readings. `VIDHI_DVARA_URL`, `VIDHI_DVARA_TOKEN`, `VIDHI_DVARA_ACTOR`:
   the door, for messages and the Dvara road. Sarathi sets them all.
+* `YANTRA_USAGE_BY=vidhi` is set for the Yantra it starts, so a step's
+  model use is named Vidhi's in the house's usage file (Yantra's
+  notes/160; `sarathi usage`).
 
 ## The source
 
